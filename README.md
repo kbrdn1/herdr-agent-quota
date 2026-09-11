@@ -28,7 +28,7 @@ a truncated bar. Cache shares a line with TTL or `no cached` when space allows.
 Meters size to the connected Herdr endpoint's sidebar — indent and scrollbar
 included — and disappear when the width is too narrow. A resize takes effect
 on the next refresh or pane
-event (`prefix+shift+r`). Under `gauges` the `cx` row takes a severity
+event (`prefix+shift+m`). Under `gauges` the `cx` row takes a severity
 colour of its own, on the same muted green/amber/red scale as `5h` and
 `7d`: colour always reads the headroom left — amber below 50% of the
 context left, red below 20%. Switch layout, fields, and percentages from
@@ -128,7 +128,7 @@ turn failures into zero usage.
 | Muse quota is missing | Run `muse login` (API-key logins have no subscription quota); check `MUSE_AUTH_PATH` if customized |
 | Rows are missing | Run the configure action below to repair managed configuration |
 | The `gauges` meter disappears on a narrow sidebar | Expected below ~24 columns; widen the sidebar and refresh |
-| `gauges` still uses the old width after a resize | Refresh with `prefix+shift+r`; there is no live resize publish path |
+| `gauges` still uses the old width after a resize | Refresh with `prefix+shift+m`; there is no live resize publish path |
 | Cache details stay on two lines under `gauges` | Widen the sidebar until the combined row fits |
 
 ```sh

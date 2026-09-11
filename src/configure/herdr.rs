@@ -62,7 +62,10 @@ const ROW_GAP_MARKER: &str = "herdr-agent-quota";
 const MANAGED_ROW_MARKER: &str = "herdr-agent-quota-row";
 
 const PROVIDER_STYLE_MARKER: &str = "herdr-agent-quota-provider";
-const REFRESH_KEY: &str = "prefix+shift+r";
+// Not `prefix+shift+r`: that is Herdr's own `reload_config`, and Herdr
+// resolves the clash by keeping its binding and disabling this one, so the
+// refresh key silently did nothing.
+const REFRESH_KEY: &str = "prefix+shift+m";
 const REFRESH_ACTION: &str = "herdr-agent-quota.refresh";
 const SETTINGS_KEY: &str = "prefix+shift+q";
 const SETTINGS_ACTION: &str = "herdr-agent-quota.open-settings";
@@ -1933,22 +1936,22 @@ rows = [["state_icon", "agent"]]
             (
                 "",
                 [
-                    "b7b1dee94a5edc6f63e37899eae64b75433716d84f1744b5af23c73715043b46",
-                    "07e1ae5d8974f8ffcaa6bc9e7ac698fb1cb29cdc1d948802205ef98ab76e690c",
+                    "8edb3aa5b91e115c6ffcfa4f8ba91ac1655ac857d49d54b66cd8245bfe522d94",
+                    "c95488cd40ac0c981d341a98938251ae6c0154a8164281e3c77549b56d692a02",
                 ],
             ),
             (
                 "[ui.sidebar.agents]\nrows = [[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]\n",
                 [
-                    "5494dcb98a118bca75fd54b899ff83a4bc7922e76ea1be8c9fa00b11a8e8f661",
-                    "61e97f09f975b35ef57e7655d141576d7c268fa9821d512f4cfcada2723f8aa3",
+                    "b8483b0b8fca382b3f841b74481d9b74a4651de53923be6913a704a1466935fc",
+                    "74ced6bfd050f5199136a097bed67062b0c0cd50c1061a97438533f19e236a18",
                 ],
             ),
             (
                 "[ui.sidebar.agents]\nrows = [[\"state_icon\", { token = \"tab\", bold = true }, \"$quota_provider_model\"], [\"$quota_topic\"]] # herdr-agent-quota-row\n",
                 [
-                    "5494dcb98a118bca75fd54b899ff83a4bc7922e76ea1be8c9fa00b11a8e8f661",
-                    "61e97f09f975b35ef57e7655d141576d7c268fa9821d512f4cfcada2723f8aa3",
+                    "b8483b0b8fca382b3f841b74481d9b74a4651de53923be6913a704a1466935fc",
+                    "74ced6bfd050f5199136a097bed67062b0c0cd50c1061a97438533f19e236a18",
                 ],
             ),
         ] {
