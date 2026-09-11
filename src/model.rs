@@ -420,6 +420,16 @@ pub struct ContextUsage {
   /// The model's context window, which decides the severity bands.
   #[serde(default)]
   pub window_size: Option<u64>,
+  /// Checked-out branch of the directory the session is working in.
+  ///
+  /// Session-local diagnostics ride this struct because it is already stored
+  /// and resolved per session (`session_contexts`); neither field is context
+  /// usage, and neither is worth a second per-session map to say so.
+  #[serde(default)]
+  pub branch: Option<String>,
+  /// The session's permission mode, as its transcript last recorded it.
+  #[serde(default)]
+  pub permission_mode: Option<String>,
 }
 
 impl ContextUsage {
@@ -433,6 +443,8 @@ impl ContextUsage {
       total_input_tokens: None,
       total_output_tokens: None,
       window_size: None,
+      branch: None,
+      permission_mode: None,
     })
   }
 
@@ -450,6 +462,11 @@ impl ContextUsage {
     self.total_input_tokens = input;
     self.total_output_tokens = output;
     self.window_size = window_size;
+    self
+  }
+
+  pub fn with_branch(mut self, branch: Option<String>) -> Self {
+    self.branch = branch;
     self
   }
 }

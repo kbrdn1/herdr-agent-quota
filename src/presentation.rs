@@ -144,6 +144,14 @@ pub struct MetadataTokens {
   /// whichever side of the ledger the row prints. Only `gauges` renders it.
   pub quota_context_severity: Option<Severity>,
   pub quota_cache: String,
+  /// Session input/output tokens as the provider counts them.
+  pub quota_traffic: String,
+  /// Branch of the tree the session is working in.
+  pub quota_branch: String,
+  /// The session's permission mode, with an icon and a hue for how much it
+  /// lets the agent do without asking.
+  pub quota_mode: String,
+  pub quota_mode_severity: Option<Severity>,
   pub quota_cache_ttl: String,
   /// A lapsed prompt cache (`no cached`). Normal, unlike `quota_error`.
   pub quota_cache_state: String,
@@ -270,6 +278,10 @@ impl MetadataTokens {
       quota_context: sidebar_context(context, style, shape),
       quota_context_severity: context.map(|context| context_severity(context, style)),
       quota_cache: sidebar_cache(context),
+      quota_traffic: sidebar_traffic(context),
+      quota_branch: sidebar_branch(context),
+      quota_mode: sidebar_mode(context),
+      quota_mode_severity: mode_severity(context),
       quota_cache_ttl: sidebar_cache_ttl(context, now_unix),
       quota_cache_state: sidebar_cache_state(context, now_unix),
       quota_error: None,
@@ -295,6 +307,10 @@ impl MetadataTokens {
       quota_context: String::new(),
       quota_context_severity: None,
       quota_cache: String::new(),
+      quota_traffic: String::new(),
+      quota_branch: String::new(),
+      quota_mode: String::new(),
+      quota_mode_severity: None,
       quota_cache_ttl: String::new(),
       quota_cache_state: String::new(),
       quota_error: Some(reason.into().chars().take(80).collect()),
@@ -472,21 +488,60 @@ pub(crate) fn sidebar_cache(context: Option<&crate::model::ContextUsage>) -> Str
     .as_ref()
     .map(|totals| totals.hit_percent)
     .unwrap_or(cache.hit_percent);
-  // Session in/out as the provider reports them, not a sum of cache counters:
-  // the latter counts every cache re-read and runs an order of magnitude high.
-  // A provider that reports neither prints the hit rate alone.
-  let traffic = context
-    .map(|context| (context.total_input_tokens, context.total_output_tokens))
-    .map(|(input, output)| match (input, output) {
-      (Some(input), Some(output)) => {
-        format!("↑{} ↓{} ", format_tokens(input), format_tokens(output))
-      }
-      (Some(input), None) => format!("↑{} ", format_tokens(input)),
-      (None, Some(output)) => format!("↓{} ", format_tokens(output)),
-      (None, None) => String::new(),
+  format!("cache {hit_percent:.1}%")
+}
+
+/// Session in/out as the provider counts them, not a sum of cache counters:
+/// the latter recounts every cache re-read and runs an order of magnitude
+/// high. A provider that reports neither gets no row.
+pub(crate) fn sidebar_traffic(context: Option<&crate::model::ContextUsage>) -> String {
+  let Some(context) = context else {
+    return String::new();
+  };
+  match (context.total_input_tokens, context.total_output_tokens) {
+    (Some(input), Some(output)) => format!("↑{} ↓{}", format_tokens(input), format_tokens(output)),
+    (Some(input), None) => format!("↑{}", format_tokens(input)),
+    (None, Some(output)) => format!("↓{}", format_tokens(output)),
+    (None, None) => String::new(),
+  }
+}
+
+pub(crate) fn sidebar_branch(context: Option<&crate::model::ContextUsage>) -> String {
+  context
+    .and_then(|context| context.branch.as_deref())
+    .map(|branch| format!("\u{f418} {branch}"))
+    .unwrap_or_default()
+}
+
+/// Icon, short label, and severity for a permission mode. Unknown names pass
+/// through verbatim on the neutral band rather than being dropped: a mode this
+/// build has not seen is still worth showing.
+fn mode_presentation(mode: &str) -> (&'static str, String, Severity) {
+  match mode {
+    "default" => ("\u{f023}", "default".to_string(), Severity::Normal),
+    "plan" => ("\u{f0f6}", "plan".to_string(), Severity::Normal),
+    "auto" => ("\u{f0e7}", "auto".to_string(), Severity::Warning),
+    "acceptEdits" => ("\u{f044}", "accept".to_string(), Severity::Warning),
+    "dontAsk" => ("\u{f05e}", "dont-ask".to_string(), Severity::Warning),
+    "bypassPermissions" => ("\u{f09c}", "bypass".to_string(), Severity::Danger),
+    other => ("\u{f023}", other.to_string(), Severity::Normal),
+  }
+}
+
+pub(crate) fn sidebar_mode(context: Option<&crate::model::ContextUsage>) -> String {
+  context
+    .and_then(|context| context.permission_mode.as_deref())
+    .map(|mode| {
+      let (icon, label, _) = mode_presentation(mode);
+      format!("{icon} {label}")
     })
-    .unwrap_or_default();
-  format!("{traffic}cache {hit_percent:.1}%")
+    .unwrap_or_default()
+}
+
+pub(crate) fn mode_severity(context: Option<&crate::model::ContextUsage>) -> Option<Severity> {
+  context
+    .and_then(|context| context.permission_mode.as_deref())
+    .map(|mode| mode_presentation(mode).2)
 }
 
 /// A token count short enough for a narrow sidebar. Rounded to the thousand

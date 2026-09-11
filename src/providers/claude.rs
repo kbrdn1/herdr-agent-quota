@@ -14,6 +14,9 @@ pub fn parse_statusline(
       .or_else(|| value.get("contextWindow")),
   )
   .unwrap_or(None);
+  if let Some(context) = context.as_mut() {
+    context.branch = super::statusline::parse_branch(value);
+  }
   apply_prompt_cache(
     &mut context,
     value

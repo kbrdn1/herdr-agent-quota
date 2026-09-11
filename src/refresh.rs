@@ -1036,13 +1036,23 @@ fn load_statusline_snapshot(cache: &CacheStore, provider: Provider) -> Result<Fe
       _ => snapshot,
     };
   }
-  let previous_cache = cache
+  let previous_context = cache
     .load(provider)
     .ok()
     .flatten()
-    .and_then(|snapshot| snapshot.context)
-    .and_then(|context| context.cache);
+    .and_then(|snapshot| snapshot.context);
+  let previous_mode = previous_context
+    .as_ref()
+    .and_then(|context| context.permission_mode.clone());
+  let previous_cache = previous_context.and_then(|context| context.cache);
   enrich_cache_session(&mut snapshot, &value, previous_cache.as_ref());
+  // A pass that appended no transcript line reports no mode; the last one
+  // observed is still the truth, so it survives rather than blanking the row.
+  if let Some(context) = snapshot.context.as_mut() {
+    if context.permission_mode.is_none() {
+      context.permission_mode = previous_mode;
+    }
+  }
   if provider == Provider::Claude {
     crate::providers::claude::apply_prompt_cache(
       &mut snapshot.context,

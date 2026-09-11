@@ -1,6 +1,6 @@
 use crate::cache::CacheStore;
 use crate::model::{Provider, ProviderSnapshot, ResetAt, UsageWindow, WindowKind};
-use crate::providers::statusline::{parse_context, parse_model};
+use crate::providers::statusline::{parse_branch, parse_context, parse_model};
 use crate::providers::ProviderError;
 use serde_json::Value;
 
@@ -120,7 +120,8 @@ pub fn parse_statusline(
             .get("context_window")
             .or_else(|| value.get("contextWindow")),
         )
-        .unwrap_or(None),
+        .unwrap_or(None)
+        .map(|context| context.with_branch(parse_branch(value))),
       ),
   )
 }

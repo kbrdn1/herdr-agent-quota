@@ -14,7 +14,7 @@ const MAX_METADATA_TOKENS: usize = 16;
 /// not free: it is compared on every refresh and it competes for Herdr's
 /// 16-token report budget. Add a name here only together with the field that
 /// fills it.
-const METADATA_TOKEN_NAMES: [&str; 25] = [
+const METADATA_TOKEN_NAMES: [&str; 30] = [
   "quota_provider",
   "quota_model",
   "quota_provider_model",
@@ -23,6 +23,11 @@ const METADATA_TOKEN_NAMES: [&str; 25] = [
   "quota_context_warning",
   "quota_context_danger",
   "quota_cache",
+  "quota_traffic",
+  "quota_branch",
+  "quota_mode_normal",
+  "quota_mode_warning",
+  "quota_mode_danger",
   "quota_cache_ttl",
   "quota_cache_state",
   "quota_5h_normal",
@@ -112,7 +117,7 @@ const CONTEXT_TOKEN_NAMES: [&str; 4] = [
 /// Values that must reach the pane in the *same* report that changed them,
 /// even when the budget is tight: the identity, the live diagnostics, and the
 /// inline week variants, whose styling flips as soon as a 5h window appears.
-const ROWS_THAT_MUST_NOT_LAG: [&str; 15] = [
+const ROWS_THAT_MUST_NOT_LAG: [&str; 20] = [
   "quota_provider",
   "quota_model",
   "quota_provider_model",
@@ -122,6 +127,11 @@ const ROWS_THAT_MUST_NOT_LAG: [&str; 15] = [
   "quota_context_warning",
   "quota_context_danger",
   "quota_cache",
+  "quota_traffic",
+  "quota_branch",
+  "quota_mode_normal",
+  "quota_mode_warning",
+  "quota_mode_danger",
   "quota_cache_ttl",
   "quota_cache_state",
   "quota_week_inline_normal",
@@ -661,6 +671,9 @@ fn desired_tokens(
     shape,
   );
   insert_optional_token(&mut tokens, "quota_cache", &values.quota_cache);
+  insert_optional_token(&mut tokens, "quota_traffic", &values.quota_traffic);
+  insert_optional_token(&mut tokens, "quota_branch", &values.quota_branch);
+  insert_mode_token(&mut tokens, &values.quota_mode, values.quota_mode_severity);
   insert_optional_token(&mut tokens, "quota_cache_ttl", &values.quota_cache_ttl);
   insert_optional_token(&mut tokens, "quota_cache_state", &values.quota_cache_state);
   let week_base = week_style_base(&values.quota_5h);
@@ -906,6 +919,34 @@ fn insert_context_token(
     context_token_name(shape, severity).to_string(),
     value.to_string(),
   );
+}
+
+const MODE_TOKEN_NAMES: [&str; 3] = [
+  "quota_mode_normal",
+  "quota_mode_warning",
+  "quota_mode_danger",
+];
+
+/// One name at a time, cleared like the context row: switching from `auto` to
+/// `bypass` moves the value to another token, and a pane that kept the old one
+/// would claim to be in two modes at once.
+fn insert_mode_token(
+  tokens: &mut BTreeMap<String, String>,
+  value: &str,
+  severity: Option<crate::model::Severity>,
+) {
+  for name in MODE_TOKEN_NAMES {
+    tokens.remove(name);
+  }
+  if value.trim().is_empty() {
+    return;
+  }
+  let name = match severity {
+    Some(crate::model::Severity::Warning) => "quota_mode_warning",
+    Some(crate::model::Severity::Danger) => "quota_mode_danger",
+    _ => "quota_mode_normal",
+  };
+  tokens.insert(name.to_string(), value.to_string());
 }
 
 fn context_token_name(
@@ -1200,6 +1241,8 @@ mod tests {
         total_input_tokens: None,
         total_output_tokens: None,
         window_size: None,
+        branch: None,
+        permission_mode: None,
         cache: Some(CacheUsage {
           fresh_input_tokens: 1_000,
           read_tokens: 50_000,

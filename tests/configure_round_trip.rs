@@ -289,7 +289,7 @@ fn non_semantic_text_inherits_the_active_herdr_theme() {
 }
 
 #[test]
-fn context_is_the_penultimate_row_and_model_shares_provider_style() {
+fn quota_windows_close_the_rows_and_model_shares_provider_style() {
   let applied =
     add_quota_row("[ui.sidebar.agents]\nrows = [[\"state_icon\", \"agent\"]]\n").unwrap();
   let document = applied.parse::<toml_edit::DocumentMut>().unwrap();
@@ -323,16 +323,34 @@ fn context_is_the_penultimate_row_and_model_shares_provider_style() {
       })
     })
     .unwrap();
-  assert_eq!(context_index + 1, limit_index);
+  let traffic_index = rows
+    .iter()
+    .position(|row| {
+      row.as_array().is_some_and(|items| {
+        items.iter().any(|item| {
+          item
+            .as_inline_table()
+            .and_then(|table| table.get("token"))
+            .and_then(toml_edit::Value::as_str)
+            .is_some_and(|token| token == "$quota_traffic")
+        })
+      })
+    })
+    .unwrap();
+  // Context leads its own readings, the traffic count follows it, and the
+  // quota windows still close the list.
+  assert!(context_index < traffic_index);
+  assert_eq!(context_index + 1, traffic_index);
   assert_eq!(limit_index + 1, rows.len());
+  assert!(traffic_index < limit_index);
 
   for (provider, color, dim) in [
     ("claude", Some("#d4825d"), Some("#dfa186")),
     ("codex", Some("#7ab8ff"), Some("#9bcaff")),
-    ("grok", Some("#e0e0e0"), Some("#999999")),
+    ("grok", Some("#e0e0e0"), Some("#b0b0b0")),
     ("agy", Some("#c79bff"), Some("#d5b4ff")),
     ("opencode", None, None),
-    ("pi", Some("#8abfb8"), None),
+    ("pi", Some("#c79bff"), None),
     ("omp", Some("#c79bff"), None),
   ] {
     let provider_rows = agents["rows_by_agent"][provider].as_value().unwrap();

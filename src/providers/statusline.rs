@@ -3,7 +3,7 @@ use crate::providers::ProviderError;
 use serde_json::Value;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Read the provider's human-readable active model label from a statusLine
 /// payload. The display name is intentionally preferred over the model id so
@@ -84,6 +84,66 @@ pub fn parse_context(
     .map_err(|error| ProviderError::UnsupportedResponse(error.to_string()))
 }
 
+/// The branch checked out where the session is working.
+///
+/// `workspace.current_dir` follows the session; `cwd` is only where it was
+/// launched, which for a worktree flow is usually the wrong tree. Resolved
+/// here, at statusLine time, so a refresh never pays for it.
+pub fn parse_branch(value: &Value) -> Option<String> {
+  let directory = value
+    .get("workspace")
+    .and_then(Value::as_object)
+    .and_then(|workspace| {
+      workspace
+        .get("current_dir")
+        .or_else(|| workspace.get("currentDir"))
+    })
+    .or_else(|| value.get("cwd"))
+    .and_then(Value::as_str)
+    .filter(|directory| !directory.is_empty())?;
+  read_branch(Path::new(directory))
+}
+
+/// Read `HEAD` without spawning git. A linked worktree's `.git` is a file
+/// pointing at the real git dir, which is where its own `HEAD` lives — the
+/// common case here, so the directory form alone would leave it empty.
+fn read_branch(start: &Path) -> Option<String> {
+  let mut directory = Some(start);
+  while let Some(current) = directory {
+    let dot_git = current.join(".git");
+    let git_dir = if dot_git.is_dir() {
+      Some(dot_git)
+    } else if dot_git.is_file() {
+      std::fs::read_to_string(&dot_git)
+        .ok()
+        .and_then(|contents| {
+          contents.lines().find_map(|line| {
+            line
+              .trim()
+              .strip_prefix("gitdir:")
+              .map(|dir| dir.trim().to_string())
+          })
+        })
+        .map(PathBuf::from)
+    } else {
+      None
+    };
+    if let Some(git_dir) = git_dir {
+      let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+      let head = head.trim();
+      return match head.strip_prefix("ref: refs/heads/") {
+        Some(branch) if !branch.is_empty() => Some(branch.to_string()),
+        // Detached HEAD prints the short sha rather than nothing, so the row
+        // still says where the tree is.
+        _ if head.len() >= 7 => Some(head[..7].to_string()),
+        _ => None,
+      };
+    }
+    directory = current.parent();
+  }
+  None
+}
+
 fn parse_cache_usage(value: Option<&Value>) -> Option<CacheUsage> {
   let object = value?.as_object()?;
   let has_cache_counters = [
@@ -157,6 +217,10 @@ pub fn enrich_cache_session(
     .map(|previous| previous.transcript_offset)
     .unwrap_or_default();
   let mut increment_totals: Option<CacheTotals> = None;
+  // The permission mode rides this pass rather than a read of its own: every
+  // appended line is already parsed here, so the last one that names a mode
+  // costs nothing extra. A pass with no new line leaves the previous value.
+  let mut latest_mode: Option<String> = None;
   let Some((next_offset, transcript_reset)) = read_transcript_increment(
     Path::new(path),
     if matching_previous.is_some() {
@@ -168,6 +232,19 @@ pub fn enrich_cache_session(
       let Ok(entry) = serde_json::from_str::<Value>(line) else {
         return;
       };
+      // Only the transcript's own `permission-mode` records count. The same
+      // key can appear inside a tool payload, where it is an argument rather
+      // than a statement about the session.
+      if entry.get("type").and_then(Value::as_str) == Some("permission-mode") {
+        if let Some(mode) = entry
+          .get("permissionMode")
+          .or_else(|| entry.get("permission_mode"))
+          .and_then(Value::as_str)
+          .filter(|mode| !mode.is_empty())
+        {
+          latest_mode = Some(mode.to_string());
+        }
+      }
       let Some(usage) = assistant_usage(&entry) else {
         return;
       };
@@ -210,6 +287,9 @@ pub fn enrich_cache_session(
 
   cache.session_totals = totals;
   cache.transcript_offset = next_offset;
+  if let Some(mode) = latest_mode {
+    context.permission_mode = Some(mode);
+  }
 }
 
 fn read_transcript_increment<F>(path: &Path, offset: u64, mut on_line: F) -> Option<(u64, bool)>

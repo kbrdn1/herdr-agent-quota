@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 
-const QUOTA_ROW_MARKERS: [&str; 43] = [
+const QUOTA_ROW_MARKERS: [&str; 48] = [
   "$quota_badge",
   "$quota_state",
   "$quota_icon",
@@ -22,6 +22,11 @@ const QUOTA_ROW_MARKERS: [&str; 43] = [
   "$quota_context_warning",
   "$quota_context_danger",
   "$quota_cache",
+  "$quota_traffic",
+  "$quota_branch",
+  "$quota_mode_normal",
+  "$quota_mode_warning",
+  "$quota_mode_danger",
   "$quota_cache_ttl",
   "$quota_cache_state",
   "$quota_error",
@@ -109,6 +114,20 @@ const GAUGE_CONTEXT_SEVERITY_PALETTE: [&str; 3] = [
   GAUGE_QUOTA_DANGER_COLOR,
 ];
 
+// Branch is metadata, not a reading: grey, like the session id and version in
+// the session's own statusLine. Traffic is a volume, not a verdict, so it gets
+// one informational hue rather than severity bands — and keeps the plugin
+// inside Herdr's per-report token budget.
+const QUOTA_MUTED_COLOR: &str = "#999999";
+const QUOTA_TRAFFIC_COLOR: &str = "#8abfb8";
+/// normal / warning / danger for the permission mode row. It follows the
+/// layout like every other band — a `gauges` sidebar is muted throughout, and
+/// one full-strength red in the middle of it would read as a fault.
+fn mode_palette(layout: SidebarLayout) -> [&'static str; 3] {
+  let [_, warning, danger] = severity_palette(layout);
+  [QUOTA_TRAFFIC_COLOR, warning, danger]
+}
+
 /// The hues the context row is painted with, which are not the window hues.
 fn context_severity_palette(layout: SidebarLayout) -> [&'static str; 3] {
   match layout {
@@ -119,15 +138,15 @@ fn context_severity_palette(layout: SidebarLayout) -> [&'static str; 3] {
 const PROVIDER_STYLES: [(Harness, &str, Option<&str>, Option<&str>); 9] = [
   (Harness::Claude, "claude", Some("#d4825d"), Some("#dfa186")),
   (Harness::Codex, "codex", Some("#7ab8ff"), Some("#9bcaff")),
-  (Harness::Grok, "grok", Some("#e0e0e0"), Some("#999999")),
+  (Harness::Grok, "grok", Some("#e0e0e0"), Some("#b0b0b0")),
   (Harness::Agy, "agy", Some("#c79bff"), Some("#d5b4ff")),
   // omp takes the previous OpenCode violet; OpenCode now uses the neutral
   // color omp inherited before it had a plugin-owned row.
   (Harness::OpenCode, "opencode", None, None),
-  (Harness::Pi, "pi", Some("#8abfb8"), None),
+  (Harness::Pi, "pi", Some("#c79bff"), None),
   (Harness::Omp, "omp", Some("#c79bff"), None),
   (Harness::Devin, "devin", Some("#7ab8ff"), None),
-  (Harness::Muse, "muse", Some("#8abfb8"), None),
+  (Harness::Muse, "muse", Some("#7ab8ff"), None),
 ];
 const THEME_SELECTION_KEYS: [&str; 2] = ["selection_bg", "active_row_bg"];
 const OFFICIAL_IDENTITY_TOKENS: [&str; 4] = ["state_icon", "machine", "workspace", "tab"];
@@ -957,9 +976,16 @@ fn append_quota_rows(rows: &mut Array, layout: SidebarLayout) {
       )));
     }
   }
+  append_mode_row(rows, layout);
   rows.push(Value::Array(styled_row(
     "$quota_topic",
     None,
+    Some(false),
+    Some(false),
+  )));
+  rows.push(Value::Array(styled_row(
+    "$quota_branch",
+    Some(QUOTA_MUTED_COLOR),
     Some(false),
     Some(false),
   )));
@@ -979,19 +1005,65 @@ fn append_identity_row(rows: &mut Array) {
   )));
 }
 
+/// The permission mode, on the band its blast radius earns: `plan` and
+/// `default` ask before acting, `bypass` does not.
+fn append_mode_row(rows: &mut Array, layout: SidebarLayout) {
+  let mut row = Array::new();
+  for (suffix, hex) in ["normal", "warning", "danger"]
+    .into_iter()
+    .zip(mode_palette(layout))
+  {
+    row.push(styled_token(
+      &format!("$quota_mode_{suffix}"),
+      Some(hex),
+      Some(false),
+      Some(false),
+    ));
+  }
+  rows.push(Value::Array(row));
+}
+
+fn append_traffic_row(rows: &mut Array) {
+  rows.push(Value::Array(styled_row(
+    "$quota_traffic",
+    Some(QUOTA_TRAFFIC_COLOR),
+    Some(false),
+    Some(false),
+  )));
+}
+
 fn append_packed_quota_rows(rows: &mut Array) {
   let palette = severity_palette(SidebarLayout::Packed);
-  append_cache_row(rows);
-
+  // Same order as the other layouts: context, then the two counters that
+  // explain it, then the quota windows.
   let mut context_row = styled_row("$quota_context", None, Some(false), Some(false));
   append_window_style_tokens(&mut context_row, "quota_week_inline", palette);
   rows.push(Value::Array(context_row));
+
+  append_traffic_row(rows);
+  append_cache_row(rows);
 
   append_window_row(rows, palette);
 }
 
 fn append_stacked_quota_rows(rows: &mut Array, layout: SidebarLayout) {
   let palette = severity_palette(layout);
+  // Context first, then the traffic and cache readings under it: the row the
+  // user watches leads, and the two counters that explain it follow.
+  match layout {
+    SidebarLayout::Gauges => {
+      let mut context_row = Array::new();
+      append_context_style_tokens(&mut context_row, context_severity_palette(layout));
+      rows.push(Value::Array(context_row));
+    }
+    _ => rows.push(Value::Array(styled_row(
+      "$quota_context",
+      None,
+      Some(false),
+      Some(false),
+    ))),
+  }
+  append_traffic_row(rows);
   match layout {
     // Herdr colours each token, not each row. Folding `no cached` into
     // `$quota_cache` would share the line and paint the warning grey.
@@ -1039,21 +1111,6 @@ fn append_stacked_quota_rows(rows: &mut Array, layout: SidebarLayout) {
     Some(false),
     Some(false),
   )));
-  match layout {
-    // Beside two coloured window rows, an uncoloured context row reads as
-    // an oversight rather than a decision.
-    SidebarLayout::Gauges => {
-      let mut context_row = Array::new();
-      append_context_style_tokens(&mut context_row, context_severity_palette(layout));
-      rows.push(Value::Array(context_row));
-    }
-    _ => rows.push(Value::Array(styled_row(
-      "$quota_context",
-      None,
-      Some(false),
-      Some(false),
-    ))),
-  }
   let mut five_hour = Array::new();
   append_window_style_tokens(&mut five_hour, "quota_5h", palette);
   rows.push(Value::Array(five_hour));
@@ -1611,13 +1668,25 @@ rows = [["state_icon", "agent"]]
       .iter()
       .position(|row| row_contains_token(row, "$quota_model"))
       .unwrap();
+    let mode_index = rows
+      .iter()
+      .position(|row| row_contains_token(row, "$quota_mode_normal"))
+      .unwrap();
     let topic_index = rows
       .iter()
       .position(|row| row_contains_token(row, "$quota_topic"))
       .unwrap();
+    let branch_index = rows
+      .iter()
+      .position(|row| row_contains_token(row, "$quota_branch"))
+      .unwrap();
     assert_eq!(identity_index + 1, provider_index);
     assert_eq!(provider_index + 1, model_index);
-    assert_eq!(model_index + 1, topic_index);
+    // The mode sits under the model it applies to, and the branch under the
+    // topic, immediately above the context row.
+    assert_eq!(model_index + 1, mode_index);
+    assert_eq!(mode_index + 1, topic_index);
+    assert_eq!(topic_index + 1, branch_index);
     assert!(!rows
       .iter()
       .any(|row| row_contains_token(row, "$quota_provider_model")));
@@ -1844,22 +1913,22 @@ rows = [["state_icon", "agent"]]
             (
                 "",
                 [
-                    "aad37c57dac67df8a2d439cbb784601c1efdc05df18d3e4982126ea202b421d1",
-                    "fb90cd6dac891077f89628f8458b18e7e02d8d20791bc12bf7a2b11ae8b4dee8",
+                    "4008bbb6dac807cee2f0917093e01382ddd4ead8904d74199969efe400134a04",
+                    "c4f9862e0c39a2c58d2a363bfbf42a9ce0e7f70d76fd6992a513620deca42bfb",
                 ],
             ),
             (
                 "[ui.sidebar.agents]\nrows = [[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]\n",
                 [
-                    "19c4aebb6538e8863b8f348e6250f95c8b3f751266bea34c154510eff1df0b61",
-                    "a8dc2c142788036531fd7b7f4d9382e8efcc83e906887dfb63ed2e65a32afb03",
+                    "91e70fb416ecf6085cb7bb9a915ff6f6780236f1f2cf601d50cd36b842aa1427",
+                    "c0333e98c75d0f5f1303664cb003c719fcf41b26c9360d576c8cedc94f96ae0b",
                 ],
             ),
             (
                 "[ui.sidebar.agents]\nrows = [[\"state_icon\", { token = \"tab\", bold = true }, \"$quota_provider_model\"], [\"$quota_topic\"]] # herdr-agent-quota-row\n",
                 [
-                    "19c4aebb6538e8863b8f348e6250f95c8b3f751266bea34c154510eff1df0b61",
-                    "a8dc2c142788036531fd7b7f4d9382e8efcc83e906887dfb63ed2e65a32afb03",
+                    "91e70fb416ecf6085cb7bb9a915ff6f6780236f1f2cf601d50cd36b842aa1427",
+                    "c0333e98c75d0f5f1303664cb003c719fcf41b26c9360d576c8cedc94f96ae0b",
                 ],
             ),
         ] {
