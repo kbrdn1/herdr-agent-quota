@@ -182,16 +182,16 @@ fn gauges_refresh_folds_cache_and_ttl_only_when_they_fit_and_suppresses_noops() 
   // The folded row carries the input-token count now, so the width it needs
   // moved with it: 26 columns no longer fit cache and TTL on one line.
   sidebar.refresh(28);
-  assert!(sidebar.tokens["quota_cache"].starts_with("1k cache 95.2% · ttl≈"));
+  assert!(sidebar.tokens["quota_cache"].starts_with("cache 95.2% · ttl≈"));
   sidebar.refresh(36);
-  assert!(sidebar.tokens["quota_cache"].starts_with("1k cache 95.2% · ttl≈"));
+  assert!(sidebar.tokens["quota_cache"].starts_with("cache 95.2% · ttl≈"));
   assert!(!sidebar.tokens.contains_key("quota_cache_ttl"));
   assert!(!sidebar
     .refresh(36)
     .iter()
     .any(|call| call == "pane report-metadata"));
   sidebar.refresh(18);
-  assert_eq!(sidebar.tokens["quota_cache"], "1k cache 95.2%");
+  assert_eq!(sidebar.tokens["quota_cache"], "cache 95.2%");
   assert!(sidebar.tokens["quota_cache_ttl"].starts_with("ttl≈"));
   sidebar.refresh(36);
   assert!(!sidebar.tokens.contains_key("quota_cache_ttl"));
@@ -201,11 +201,11 @@ fn gauges_refresh_folds_cache_and_ttl_only_when_they_fit_and_suppresses_noops() 
 fn gauges_refresh_keeps_no_cached_on_its_amber_token() {
   let mut sidebar = Sidebar::expired(PercentStyle::Remaining);
   sidebar.refresh(36);
-  assert_eq!(sidebar.tokens["quota_cache"], "1k cache 95.2%");
+  assert_eq!(sidebar.tokens["quota_cache"], "cache 95.2%");
   assert_eq!(sidebar.tokens["quota_cache_state"], "no cached");
   assert!(!sidebar.tokens.contains_key("quota_cache_ttl"));
   sidebar.refresh(18);
-  assert_eq!(sidebar.tokens["quota_cache"], "1k cache 95.2%");
+  assert_eq!(sidebar.tokens["quota_cache"], "cache 95.2%");
   assert_eq!(sidebar.tokens["quota_cache_state"], "no cached");
 }
 
@@ -217,7 +217,7 @@ fn gauges_folding_respects_hidden_fields_and_other_layouts() {
     cache.set_fields(FieldSet::parse(fields).unwrap()).unwrap();
     sidebar.refresh(36);
     assert_eq!(
-      sidebar.tokens["quota_cache"], "1k cache 95.2%",
+      sidebar.tokens["quota_cache"], "cache 95.2%",
       "fields={fields}"
     );
     assert!(
@@ -229,7 +229,7 @@ fn gauges_folding_respects_hidden_fields_and_other_layouts() {
   for layout in [SidebarLayout::Packed, SidebarLayout::Stacked] {
     cache.set_sidebar_layout(layout).unwrap();
     sidebar.refresh(36);
-    assert_eq!(sidebar.tokens["quota_cache"], "1k cache 95.2%");
+    assert_eq!(sidebar.tokens["quota_cache"], "cache 95.2%");
     assert!(sidebar.tokens.contains_key("quota_cache_ttl"));
     assert_eq!(sidebar.tokens["quota_context"], "context 43%");
   }

@@ -90,6 +90,32 @@ fn severity_palette(layout: SidebarLayout) -> [&'static str; 3] {
     SidebarLayout::Packed | SidebarLayout::Stacked => SEVERITY_PALETTE,
   }
 }
+
+// A healthy context is violet, not green. The row reports how much of the
+// window has been spent, which is a different question from how much quota is
+// left; painting both green would claim they are the same reading. The warning
+// and danger bands are shared, because past a threshold both rows mean the
+// same thing.
+const QUOTA_CONTEXT_SAFE_COLOR: &str = "#c79bff";
+const GAUGE_QUOTA_CONTEXT_SAFE_COLOR: &str = "#b59ad6";
+const CONTEXT_SEVERITY_PALETTE: [&str; 3] = [
+  QUOTA_CONTEXT_SAFE_COLOR,
+  QUOTA_WARNING_COLOR,
+  QUOTA_DANGER_COLOR,
+];
+const GAUGE_CONTEXT_SEVERITY_PALETTE: [&str; 3] = [
+  GAUGE_QUOTA_CONTEXT_SAFE_COLOR,
+  GAUGE_QUOTA_WARNING_COLOR,
+  GAUGE_QUOTA_DANGER_COLOR,
+];
+
+/// The hues the context row is painted with, which are not the window hues.
+fn context_severity_palette(layout: SidebarLayout) -> [&'static str; 3] {
+  match layout {
+    SidebarLayout::Gauges => GAUGE_CONTEXT_SEVERITY_PALETTE,
+    SidebarLayout::Packed | SidebarLayout::Stacked => CONTEXT_SEVERITY_PALETTE,
+  }
+}
 const PROVIDER_STYLES: [(Harness, &str, Option<&str>, Option<&str>); 9] = [
   (Harness::Claude, "claude", Some("#d4825d"), Some("#dfa186")),
   (Harness::Codex, "codex", Some("#7ab8ff"), Some("#9bcaff")),
@@ -1018,7 +1044,7 @@ fn append_stacked_quota_rows(rows: &mut Array, layout: SidebarLayout) {
     // an oversight rather than a decision.
     SidebarLayout::Gauges => {
       let mut context_row = Array::new();
-      append_context_style_tokens(&mut context_row, palette);
+      append_context_style_tokens(&mut context_row, context_severity_palette(layout));
       rows.push(Value::Array(context_row));
     }
     _ => rows.push(Value::Array(styled_row(
@@ -1707,7 +1733,7 @@ rows = [["state_icon", "agent"]]
     assert_eq!(
       styled,
       vec![
-        ("$quota_context_normal", GAUGE_QUOTA_SAFE_COLOR),
+        ("$quota_context_normal", GAUGE_QUOTA_CONTEXT_SAFE_COLOR),
         ("$quota_context_warning", GAUGE_QUOTA_WARNING_COLOR),
         ("$quota_context_danger", GAUGE_QUOTA_DANGER_COLOR),
       ]
@@ -1874,7 +1900,12 @@ rows = [["state_icon", "agent"]]
         );
       }
     }
-    for (suffix, hex) in ["normal", "warning", "danger"].into_iter().zip(expected) {
+    // The context row has its own safe hue, so it is checked against its own
+    // palette rather than the window one.
+    for (suffix, hex) in ["normal", "warning", "danger"]
+      .into_iter()
+      .zip(context_severity_palette(layout))
+    {
       let token = format!("$quota_context_{suffix}");
       let fg = token_fg(&document, &token);
       match layout {
@@ -1947,7 +1978,10 @@ rows = [["state_icon", "agent"]]
     let rows = document["ui"]["sidebar"]["agents"]["rows_by_agent"]["claude"]
       .as_array()
       .unwrap();
-    for token in ["$quota_5h_normal", "$quota_context_normal"] {
+    for (token, hex) in [
+      ("$quota_5h_normal", GAUGE_QUOTA_SAFE_COLOR),
+      ("$quota_context_normal", GAUGE_QUOTA_CONTEXT_SAFE_COLOR),
+    ] {
       let fg = rows
         .iter()
         .filter_map(Value::as_array)
@@ -1956,7 +1990,7 @@ rows = [["state_icon", "agent"]]
         .and_then(Value::as_inline_table)
         .and_then(|table| table.get("fg"))
         .and_then(Value::as_str);
-      assert_eq!(fg, Some(GAUGE_QUOTA_SAFE_COLOR), "{token}");
+      assert_eq!(fg, Some(hex), "{token}");
     }
   }
 

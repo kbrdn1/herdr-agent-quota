@@ -409,6 +409,17 @@ pub struct ContextUsage {
   pub used_percent: f64,
   #[serde(default)]
   pub cache: Option<CacheUsage>,
+  /// Session totals reported by the provider, not derived from cache
+  /// counters: `total_input_tokens` excludes nothing and `total_output_tokens`
+  /// exists nowhere else. `None` for a provider whose payload omits them —
+  /// a missing count renders empty rather than as a fabricated zero.
+  #[serde(default)]
+  pub total_input_tokens: Option<u64>,
+  #[serde(default)]
+  pub total_output_tokens: Option<u64>,
+  /// The model's context window, which decides the severity bands.
+  #[serde(default)]
+  pub window_size: Option<u64>,
 }
 
 impl ContextUsage {
@@ -419,11 +430,26 @@ impl ContextUsage {
     Ok(Self {
       used_percent,
       cache: None,
+      total_input_tokens: None,
+      total_output_tokens: None,
+      window_size: None,
     })
   }
 
   pub fn with_cache(mut self, cache: Option<CacheUsage>) -> Self {
     self.cache = cache;
+    self
+  }
+
+  pub fn with_totals(
+    mut self,
+    input: Option<u64>,
+    output: Option<u64>,
+    window_size: Option<u64>,
+  ) -> Self {
+    self.total_input_tokens = input;
+    self.total_output_tokens = output;
+    self.window_size = window_size;
     self
   }
 }
@@ -957,13 +983,32 @@ impl Severity {
     Self::for_headroom(window.remaining_percent)
   }
 
-  /// Headroom left in the context window, on the same bands as
-  /// [`Self::for_window`] — a sidebar row means the same thing whichever
-  /// row it is.
+  /// Headroom left in the context window.
+  ///
+  /// The context row does not share the window bands, because it does not
+  /// mean the same thing: a quota window is capacity, the context window is
+  /// *performance*. Long-context attention degrades well before the window
+  /// fills, and a model that bills flat at 1M has no capacity worry at all.
+  /// So a 1M-class window warns at 20% used and alarms at 50%, while a
+  /// 200K-class one tracks the fill it is actually about to hit (55% / 75%).
+  ///
+  /// An unknown window size keeps the 200K bands: they are the conservative
+  /// pair, and a provider that reports no size is likelier to be small.
   ///
   /// Never `Unknown`: a context row exists only when a percent was read.
-  pub fn for_context_remaining(remaining_percent: f64) -> Self {
-    Self::for_headroom(remaining_percent)
+  pub fn for_context_remaining(remaining_percent: f64, window_size: Option<u64>) -> Self {
+    let used = (100.0 - remaining_percent).round();
+    let (warning, danger) = match window_size {
+      Some(size) if size >= 1_000_000 => (20.0, 50.0),
+      _ => (55.0, 75.0),
+    };
+    if used >= danger {
+      Self::Danger
+    } else if used >= warning {
+      Self::Warning
+    } else {
+      Self::Normal
+    }
   }
 
   /// The one band table every sidebar row is coloured by. Classify the
@@ -1152,26 +1197,32 @@ mod tests {
   /// Context severity reads headroom, exactly like a window's: it bands on
   /// the context left, so every sidebar row means the same thing.
   #[test]
-  fn context_severity_is_thresholded_on_remaining_at_fifty_and_twenty() {
-    for (used_percent, expected) in [
-      (0.0, Severity::Normal),
-      (31.0, Severity::Normal),
-      (49.0, Severity::Normal),
-      (49.4, Severity::Normal),
-      (50.0, Severity::Normal),
-      (51.0, Severity::Warning),
-      (53.0, Severity::Warning),
-      (79.0, Severity::Warning),
-      (79.4, Severity::Warning),
-      (80.0, Severity::Warning),
-      (81.0, Severity::Danger),
-      (85.0, Severity::Danger),
-      (100.0, Severity::Danger),
+  fn context_severity_bands_follow_the_window_size() {
+    let million = Some(1_000_000);
+    let small = Some(200_000);
+    for (used_percent, window_size, expected) in [
+      // A 1M-class window bands on degradation, not on fill.
+      (0.0, million, Severity::Normal),
+      (19.4, million, Severity::Normal),
+      (20.0, million, Severity::Warning),
+      (49.4, million, Severity::Warning),
+      (50.0, million, Severity::Danger),
+      (100.0, million, Severity::Danger),
+      // A 200K-class one bands on the fill it is about to hit.
+      (20.0, small, Severity::Normal),
+      (54.4, small, Severity::Normal),
+      (55.0, small, Severity::Warning),
+      (74.4, small, Severity::Warning),
+      (75.0, small, Severity::Danger),
+      // An unreported size keeps the conservative pair.
+      (54.0, None, Severity::Normal),
+      (55.0, None, Severity::Warning),
+      (75.0, None, Severity::Danger),
     ] {
       assert_eq!(
-        Severity::for_context_remaining(100.0 - used_percent),
+        Severity::for_context_remaining(100.0 - used_percent, window_size),
         expected,
-        "{used_percent} used"
+        "{used_percent} used of {window_size:?}"
       );
     }
   }

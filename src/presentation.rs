@@ -433,7 +433,7 @@ pub(crate) fn context_severity(
     PercentStyle::Remaining => printed,
     PercentStyle::Used => 100.0 - printed,
   };
-  Severity::for_context_remaining(remaining)
+  Severity::for_context_remaining(remaining, context.window_size)
 }
 
 pub(crate) fn sidebar_context(
@@ -467,33 +467,31 @@ pub(crate) fn sidebar_cache(context: Option<&crate::model::ContextUsage>) -> Str
   let Some(cache) = context.and_then(|context| context.cache.as_ref()) else {
     return String::new();
   };
-  let (hit_percent, input_tokens) = cache
+  let hit_percent = cache
     .session_totals
     .as_ref()
-    .map(|totals| {
-      (
-        totals.hit_percent,
-        totals
-          .fresh_input_tokens
-          .saturating_add(totals.read_tokens)
-          .saturating_add(totals.creation_tokens),
-      )
+    .map(|totals| totals.hit_percent)
+    .unwrap_or(cache.hit_percent);
+  // Session in/out as the provider reports them, not a sum of cache counters:
+  // the latter counts every cache re-read and runs an order of magnitude high.
+  // A provider that reports neither prints the hit rate alone.
+  let traffic = context
+    .map(|context| (context.total_input_tokens, context.total_output_tokens))
+    .map(|(input, output)| match (input, output) {
+      (Some(input), Some(output)) => {
+        format!("↑{} ↓{} ", format_tokens(input), format_tokens(output))
+      }
+      (Some(input), None) => format!("↑{} ", format_tokens(input)),
+      (None, Some(output)) => format!("↓{} ", format_tokens(output)),
+      (None, None) => String::new(),
     })
-    .unwrap_or_else(|| {
-      (
-        cache.hit_percent,
-        cache
-          .fresh_input_tokens
-          .saturating_add(cache.read_tokens)
-          .saturating_add(cache.creation_tokens),
-      )
-    });
-  // Rounded to the thousand so the token only churns — and only repaints the
-  // pane — when the count moves a visible amount.
-  format!("{} cache {:.1}%", format_tokens(input_tokens), hit_percent)
+    .unwrap_or_default();
+  format!("{traffic}cache {hit_percent:.1}%")
 }
 
-/// Input tokens of the latest request, short enough for a narrow sidebar.
+/// A token count short enough for a narrow sidebar. Rounded to the thousand
+/// above 1k so the token only churns — and only repaints the pane — when the
+/// count moves a visible amount.
 fn format_tokens(tokens: u64) -> String {
   match tokens {
     0..=999 => tokens.to_string(),
@@ -1104,7 +1102,7 @@ mod tests {
       SidebarShape::default(),
     );
     assert_eq!(values.quota_context, "context 43%");
-    assert_eq!(values.quota_cache, "1k cache 72.7%");
+    assert_eq!(values.quota_cache, "cache 72.7%");
     assert_eq!(
       MetadataTokens::from_snapshot_for_session(
         &snapshot,
@@ -1162,7 +1160,7 @@ mod tests {
     .with_context(Some(context));
     let values = MetadataTokens::from_snapshot(&snapshot, 0);
     assert_eq!(values.quota_context, "context 24%");
-    assert_eq!(values.quota_cache, "1k cache 80.0%");
+    assert_eq!(values.quota_cache, "cache 80.0%");
     assert_eq!(values.quota_cache_ttl, "ttl≈1h");
     assert_eq!(values.quota_error, None);
   }
@@ -1192,7 +1190,7 @@ mod tests {
       PercentStyle::default(),
       SidebarShape::default(),
     );
-    assert_eq!(values.quota_cache, "1k cache 80.0%");
+    assert_eq!(values.quota_cache, "cache 80.0%");
     assert_eq!(values.quota_cache_ttl, "ttl≈1h");
   }
 
@@ -1446,7 +1444,7 @@ mod tests {
         .with_cache(Some(cache)),
     ));
     let values = MetadataTokens::from_snapshot(&snapshot, 0);
-    assert_eq!(values.quota_cache, "436k cache 99.2%");
+    assert_eq!(values.quota_cache, "cache 99.2%");
   }
 
   /// The bar shortens with the sidebar and disappears rather
@@ -1683,32 +1681,36 @@ mod tests {
     }
   }
 
-  /// Colour reads headroom on every row, so the context row bands on
-  /// remaining context and not on the number it happens to print.
+  /// Colour reads the context spent, not the number the row happens to
+  /// print, and its bands follow the model's window size.
   #[test]
   fn the_context_row_is_coloured_by_remaining_context_under_either_style() {
-    for (used, expected) in [
-      (0.0, Severity::Normal),
-      (31.0, Severity::Normal),
-      (49.0, Severity::Normal),
-      (50.0, Severity::Normal),
-      (51.0, Severity::Warning),
-      (53.0, Severity::Warning),
-      (79.0, Severity::Warning),
-      (80.0, Severity::Warning),
-      (81.0, Severity::Danger),
-      (85.0, Severity::Danger),
-      (100.0, Severity::Danger),
+    for (used, window_size, expected) in [
+      (0.0, Some(1_000_000), Severity::Normal),
+      (19.0, Some(1_000_000), Severity::Normal),
+      (20.0, Some(1_000_000), Severity::Warning),
+      (49.0, Some(1_000_000), Severity::Warning),
+      (50.0, Some(1_000_000), Severity::Danger),
+      (100.0, Some(1_000_000), Severity::Danger),
+      (31.0, None, Severity::Normal),
+      (54.0, None, Severity::Normal),
+      (55.0, None, Severity::Warning),
+      (74.0, None, Severity::Warning),
+      (75.0, None, Severity::Danger),
+      (100.0, None, Severity::Danger),
     ] {
-      let snapshot = ProviderSnapshot::new(Provider::Claude, vec![], 0)
-        .with_context(Some(crate::model::ContextUsage::new(used).unwrap()));
+      let snapshot = ProviderSnapshot::new(Provider::Claude, vec![], 0).with_context(Some(
+        crate::model::ContextUsage::new(used)
+          .unwrap()
+          .with_totals(None, None, window_size),
+      ));
       for style in [PercentStyle::Remaining, PercentStyle::Used] {
         let values =
           MetadataTokens::from_snapshot_for_session(&snapshot, 0, None, style, gauges(30));
         assert_eq!(
           values.quota_context_severity,
           Some(expected),
-          "{used} used, {style:?}"
+          "{used} used of {window_size:?}, {style:?}"
         );
       }
     }

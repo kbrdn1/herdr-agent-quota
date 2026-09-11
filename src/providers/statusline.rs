@@ -22,6 +22,24 @@ pub fn parse_model(value: &Value) -> Option<String> {
     .map(str::trim)
     .filter(|model| !model.is_empty())
     .map(str::to_string)
+    .map(|model| match parse_effort(value) {
+      Some(effort) => format!("{model} · {effort}"),
+      None => model,
+    })
+}
+
+/// The reasoning effort, suffixed onto the model the way the session's own
+/// statusLine shows it. `high` is the default, so naming it would be noise;
+/// a provider without the parameter reports no level at all.
+fn parse_effort(value: &Value) -> Option<String> {
+  value
+    .get("effort")
+    .and_then(Value::as_object)
+    .and_then(|effort| effort.get("level"))
+    .and_then(Value::as_str)
+    .map(str::trim)
+    .filter(|level| !level.is_empty() && *level != "high")
+    .map(str::to_string)
 }
 
 pub fn parse_context(
@@ -47,8 +65,21 @@ pub fn parse_context(
     return Ok(None);
   };
   let cache = parse_cache_usage(object.get("current_usage"));
+  let total = |snake: &str, camel: &str| {
+    object
+      .get(snake)
+      .or_else(|| object.get(camel))
+      .and_then(Value::as_u64)
+  };
+  let input = total("total_input_tokens", "totalInputTokens");
+  let output = total("total_output_tokens", "totalOutputTokens");
+  let window_size = total("context_window_size", "contextWindowSize");
   ContextUsage::new(percent)
-    .map(|context| context.with_cache(cache))
+    .map(|context| {
+      context
+        .with_cache(cache)
+        .with_totals(input, output, window_size)
+    })
     .map(Some)
     .map_err(|error| ProviderError::UnsupportedResponse(error.to_string()))
 }

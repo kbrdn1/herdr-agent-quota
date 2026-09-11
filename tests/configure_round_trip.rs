@@ -2373,10 +2373,7 @@ fn pi_codex_event_overlays_exact_session_context_and_cache_without_inventing_ttl
     calls.contains("--token quota_context=context 55%"),
     "{calls}"
   );
-  assert!(
-    calls.contains("--token quota_cache=200 cache 85.0%"),
-    "{calls}"
-  );
+  assert!(calls.contains("--token quota_cache=cache 85.0%"), "{calls}");
   assert!(!calls.contains("quota_cache_ttl"), "{calls}");
   assert!(
     calls.contains("--token quota_week_inline_normal=7d 80%"),
@@ -2466,10 +2463,7 @@ fn pi_payg_event_clears_stale_quota_without_invoking_a_collector() {
     calls.contains("--token quota_context=context 50%"),
     "{calls}"
   );
-  assert!(
-    calls.contains("--token quota_cache=100 cache 80.0%"),
-    "{calls}"
-  );
+  assert!(calls.contains("--token quota_cache=cache 80.0%"), "{calls}");
   assert!(!calls.contains("quota_cache_ttl"), "{calls}");
   assert!(!codex_log.exists(), "PAYG route invoked Codex");
 }
@@ -2509,10 +2503,7 @@ fn pi_indeterminate_event_removes_quota_but_keeps_current_session_diagnostics() 
     calls.contains("--token quota_context=context 50%"),
     "{calls}"
   );
-  assert!(
-    calls.contains("--token quota_cache=100 cache 80.0%"),
-    "{calls}"
-  );
+  assert!(calls.contains("--token quota_cache=cache 80.0%"), "{calls}");
   assert!(calls.contains("--clear-token quota_cache_ttl"), "{calls}");
   assert!(calls.contains("--clear-token quota_5h"), "{calls}");
   assert!(calls.contains("--clear-token quota_week"), "{calls}");

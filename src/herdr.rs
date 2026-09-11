@@ -1197,6 +1197,9 @@ mod tests {
       .with_model(Some("A Very Long Model Name".to_string()))
       .with_context(Some(ContextUsage {
         used_percent: 61.0,
+        total_input_tokens: None,
+        total_output_tokens: None,
+        window_size: None,
         cache: Some(CacheUsage {
           fresh_input_tokens: 1_000,
           read_tokens: 50_000,
@@ -1450,27 +1453,31 @@ mod tests {
     assert!(names.contains(&"quota_cache_ttl"));
   }
 
-  /// The context row is coloured by the context *left* under `gauges`, on
-  /// the windows' own bands, whichever side of the ledger it prints.
+  /// The context row is coloured by the context spent under `gauges`, on its
+  /// own bands, whichever side of the ledger it prints.
   #[test]
   fn gauges_publishes_context_into_the_severity_name_its_headroom_earns() {
     let gauges = SidebarShape::from(crate::cli::SidebarLayout::Gauges);
-    for (used, expected) in [
-      (31.0, "quota_context_normal"),
-      (49.0, "quota_context_normal"),
-      (50.0, "quota_context_normal"),
-      (51.0, "quota_context_warning"),
-      (53.0, "quota_context_warning"),
-      (79.0, "quota_context_warning"),
-      (80.0, "quota_context_warning"),
-      (81.0, "quota_context_danger"),
-      (85.0, "quota_context_danger"),
+    for (used, window_size, expected) in [
+      (19.0, Some(1_000_000), "quota_context_normal"),
+      (20.0, Some(1_000_000), "quota_context_warning"),
+      (49.0, Some(1_000_000), "quota_context_warning"),
+      (50.0, Some(1_000_000), "quota_context_danger"),
+      (85.0, Some(1_000_000), "quota_context_danger"),
+      (31.0, None, "quota_context_normal"),
+      (54.0, None, "quota_context_normal"),
+      (55.0, None, "quota_context_warning"),
+      (74.0, None, "quota_context_warning"),
+      (75.0, None, "quota_context_danger"),
+      (85.0, None, "quota_context_danger"),
     ] {
       for percent in [PercentStyle::Remaining, PercentStyle::Used] {
         let mut tokens = BTreeMap::new();
         apply_context(
           &mut tokens,
-          &ContextUsage::new(used).unwrap(),
+          &ContextUsage::new(used)
+            .unwrap()
+            .with_totals(None, None, window_size),
           0,
           RowStyle::new(percent, gauges),
         );
@@ -1481,7 +1488,7 @@ mod tests {
         assert_eq!(
           published,
           vec![expected],
-          "context {used} used, {percent:?}"
+          "context {used} used of {window_size:?}, {percent:?}"
         );
       }
     }
