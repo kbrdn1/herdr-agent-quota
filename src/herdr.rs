@@ -14,7 +14,7 @@ const MAX_METADATA_TOKENS: usize = 16;
 /// not free: it is compared on every refresh and it competes for Herdr's
 /// 16-token report budget. Add a name here only together with the field that
 /// fills it.
-const METADATA_TOKEN_NAMES: [&str; 30] = [
+const METADATA_TOKEN_NAMES: [&str; 32] = [
   "quota_provider",
   "quota_model",
   "quota_provider_model",
@@ -23,7 +23,11 @@ const METADATA_TOKEN_NAMES: [&str; 30] = [
   "quota_context_warning",
   "quota_context_danger",
   "quota_cache",
+  // Never published any more; listed so a pane that still carries the
+  // single-token spelling gets it cleared.
   "quota_traffic",
+  "quota_traffic_in",
+  "quota_traffic_out",
   "quota_branch",
   "quota_mode_normal",
   "quota_mode_warning",
@@ -117,7 +121,7 @@ const CONTEXT_TOKEN_NAMES: [&str; 4] = [
 /// Values that must reach the pane in the *same* report that changed them,
 /// even when the budget is tight: the identity, the live diagnostics, and the
 /// inline week variants, whose styling flips as soon as a 5h window appears.
-const ROWS_THAT_MUST_NOT_LAG: [&str; 20] = [
+const ROWS_THAT_MUST_NOT_LAG: [&str; 21] = [
   "quota_provider",
   "quota_model",
   "quota_provider_model",
@@ -127,7 +131,8 @@ const ROWS_THAT_MUST_NOT_LAG: [&str; 20] = [
   "quota_context_warning",
   "quota_context_danger",
   "quota_cache",
-  "quota_traffic",
+  "quota_traffic_in",
+  "quota_traffic_out",
   "quota_branch",
   "quota_mode_normal",
   "quota_mode_warning",
@@ -671,7 +676,8 @@ fn desired_tokens(
     shape,
   );
   insert_optional_token(&mut tokens, "quota_cache", &values.quota_cache);
-  insert_optional_token(&mut tokens, "quota_traffic", &values.quota_traffic);
+  insert_optional_token(&mut tokens, "quota_traffic_in", &values.quota_traffic_in);
+  insert_optional_token(&mut tokens, "quota_traffic_out", &values.quota_traffic_out);
   insert_optional_token(&mut tokens, "quota_branch", &values.quota_branch);
   insert_mode_token(&mut tokens, &values.quota_mode, values.quota_mode_severity);
   insert_optional_token(&mut tokens, "quota_cache_ttl", &values.quota_cache_ttl);

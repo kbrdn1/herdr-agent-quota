@@ -16,6 +16,7 @@ pub fn parse_statusline(
   .unwrap_or(None);
   if let Some(context) = context.as_mut() {
     context.branch = super::statusline::parse_branch(value);
+    context.permission_mode = super::statusline::parse_permission_mode(value);
   }
   apply_prompt_cache(
     &mut context,

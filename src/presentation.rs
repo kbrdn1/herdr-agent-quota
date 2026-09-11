@@ -144,8 +144,11 @@ pub struct MetadataTokens {
   /// whichever side of the ledger the row prints. Only `gauges` renders it.
   pub quota_context_severity: Option<Severity>,
   pub quota_cache: String,
-  /// Session input/output tokens as the provider counts them.
-  pub quota_traffic: String,
+  /// Session input and output tokens as the provider counts them. Two
+  /// tokens, not one string: Herdr fixes a colour per token name, so this is
+  /// the only way the two counts get different hues on the same row.
+  pub quota_traffic_in: String,
+  pub quota_traffic_out: String,
   /// Branch of the tree the session is working in.
   pub quota_branch: String,
   /// The session's permission mode, with an icon and a hue for how much it
@@ -278,7 +281,8 @@ impl MetadataTokens {
       quota_context: sidebar_context(context, style, shape),
       quota_context_severity: context.map(|context| context_severity(context, style)),
       quota_cache: sidebar_cache(context),
-      quota_traffic: sidebar_traffic(context),
+      quota_traffic_in: sidebar_traffic_in(context),
+      quota_traffic_out: sidebar_traffic_out(context),
       quota_branch: sidebar_branch(context),
       quota_mode: sidebar_mode(context),
       quota_mode_severity: mode_severity(context),
@@ -307,7 +311,8 @@ impl MetadataTokens {
       quota_context: String::new(),
       quota_context_severity: None,
       quota_cache: String::new(),
-      quota_traffic: String::new(),
+      quota_traffic_in: String::new(),
+      quota_traffic_out: String::new(),
       quota_branch: String::new(),
       quota_mode: String::new(),
       quota_mode_severity: None,
@@ -494,16 +499,18 @@ pub(crate) fn sidebar_cache(context: Option<&crate::model::ContextUsage>) -> Str
 /// Session in/out as the provider counts them, not a sum of cache counters:
 /// the latter recounts every cache re-read and runs an order of magnitude
 /// high. A provider that reports neither gets no row.
-pub(crate) fn sidebar_traffic(context: Option<&crate::model::ContextUsage>) -> String {
-  let Some(context) = context else {
-    return String::new();
-  };
-  match (context.total_input_tokens, context.total_output_tokens) {
-    (Some(input), Some(output)) => format!("↑{} ↓{}", format_tokens(input), format_tokens(output)),
-    (Some(input), None) => format!("↑{}", format_tokens(input)),
-    (None, Some(output)) => format!("↓{}", format_tokens(output)),
-    (None, None) => String::new(),
-  }
+pub(crate) fn sidebar_traffic_in(context: Option<&crate::model::ContextUsage>) -> String {
+  context
+    .and_then(|context| context.total_input_tokens)
+    .map(|input| format!("↑{}", format_tokens(input)))
+    .unwrap_or_default()
+}
+
+pub(crate) fn sidebar_traffic_out(context: Option<&crate::model::ContextUsage>) -> String {
+  context
+    .and_then(|context| context.total_output_tokens)
+    .map(|output| format!("↓{}", format_tokens(output)))
+    .unwrap_or_default()
 }
 
 pub(crate) fn sidebar_branch(context: Option<&crate::model::ContextUsage>) -> String {

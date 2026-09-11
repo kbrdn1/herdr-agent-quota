@@ -318,7 +318,16 @@ impl CacheStore {
       }
     }
     if let Some(session_id) = session_id {
-      if let Some(context) = snapshot.context.clone() {
+      if let Some(mut context) = snapshot.context.clone() {
+        // The permission mode is only restated when it changes, so a pass
+        // that read no new transcript line carries none. Keep the last one
+        // this session reported rather than blanking its row.
+        if context.permission_mode.is_none() {
+          context.permission_mode = snapshot
+            .session_contexts
+            .get(session_id)
+            .and_then(|previous| previous.permission_mode.clone());
+        }
         snapshot
           .session_contexts
           .insert(session_id.to_string(), context);
@@ -413,7 +422,16 @@ impl CacheStore {
       }
     }
     if let Some(session_id) = session_id {
-      if let Some(context) = snapshot.context.clone() {
+      if let Some(mut context) = snapshot.context.clone() {
+        // The permission mode is only restated when it changes, so a pass
+        // that read no new transcript line carries none. Keep the last one
+        // this session reported rather than blanking its row.
+        if context.permission_mode.is_none() {
+          context.permission_mode = snapshot
+            .session_contexts
+            .get(session_id)
+            .and_then(|previous| previous.permission_mode.clone());
+        }
         snapshot
           .session_contexts
           .insert(session_id.to_string(), context);

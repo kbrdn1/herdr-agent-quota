@@ -217,10 +217,6 @@ pub fn enrich_cache_session(
     .map(|previous| previous.transcript_offset)
     .unwrap_or_default();
   let mut increment_totals: Option<CacheTotals> = None;
-  // The permission mode rides this pass rather than a read of its own: every
-  // appended line is already parsed here, so the last one that names a mode
-  // costs nothing extra. A pass with no new line leaves the previous value.
-  let mut latest_mode: Option<String> = None;
   let Some((next_offset, transcript_reset)) = read_transcript_increment(
     Path::new(path),
     if matching_previous.is_some() {
@@ -232,19 +228,6 @@ pub fn enrich_cache_session(
       let Ok(entry) = serde_json::from_str::<Value>(line) else {
         return;
       };
-      // Only the transcript's own `permission-mode` records count. The same
-      // key can appear inside a tool payload, where it is an argument rather
-      // than a statement about the session.
-      if entry.get("type").and_then(Value::as_str) == Some("permission-mode") {
-        if let Some(mode) = entry
-          .get("permissionMode")
-          .or_else(|| entry.get("permission_mode"))
-          .and_then(Value::as_str)
-          .filter(|mode| !mode.is_empty())
-        {
-          latest_mode = Some(mode.to_string());
-        }
-      }
       let Some(usage) = assistant_usage(&entry) else {
         return;
       };
@@ -287,9 +270,43 @@ pub fn enrich_cache_session(
 
   cache.session_totals = totals;
   cache.transcript_offset = next_offset;
-  if let Some(mode) = latest_mode {
-    context.permission_mode = Some(mode);
-  }
+}
+
+/// How far back to look for a permission mode. It is only written when it
+/// changes, so the record can be far from the end; a mode older than this tail
+/// is left unknown rather than paid for on every turn.
+const MODE_LOOKBACK_BYTES: u64 = 1 << 20;
+
+/// The session's permission mode, from its transcript.
+///
+/// Resolved beside the branch rather than inside the cache pass: that pass
+/// returns early whenever it has no cache counters to accumulate, and the
+/// mode has to survive those turns. Only the transcript's own
+/// `permission-mode` records count — the same key appears inside tool
+/// payloads, where it is an argument and not a statement about the session.
+pub fn parse_permission_mode(value: &Value) -> Option<String> {
+  let path = value.get("transcript_path").and_then(Value::as_str)?;
+  last_permission_mode(Path::new(path))
+}
+
+fn last_permission_mode(path: &Path) -> Option<String> {
+  const MARKER: &str = "\"type\":\"permission-mode\"";
+  let mut file = File::open(path).ok()?;
+  let length = file.metadata().ok()?.len();
+  let start = length.saturating_sub(MODE_LOOKBACK_BYTES);
+  file.seek(SeekFrom::Start(start)).ok()?;
+  let mut tail = String::new();
+  BufReader::new(file).read_to_string(&mut tail).ok()?;
+  // Scan for the marker before parsing: only the matching line is worth the
+  // JSON, and there are thousands of lines in the window.
+  let line = tail.lines().rev().find(|line| line.contains(MARKER))?;
+  let entry = serde_json::from_str::<Value>(line).ok()?;
+  entry
+    .get("permissionMode")
+    .or_else(|| entry.get("permission_mode"))
+    .and_then(Value::as_str)
+    .filter(|mode| !mode.is_empty())
+    .map(str::to_string)
 }
 
 fn read_transcript_increment<F>(path: &Path, offset: u64, mut on_line: F) -> Option<(u64, bool)>

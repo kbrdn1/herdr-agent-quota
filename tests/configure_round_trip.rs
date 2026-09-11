@@ -332,7 +332,7 @@ fn quota_windows_close_the_rows_and_model_shares_provider_style() {
             .as_inline_table()
             .and_then(|table| table.get("token"))
             .and_then(toml_edit::Value::as_str)
-            .is_some_and(|token| token == "$quota_traffic")
+            .is_some_and(|token| token == "$quota_traffic_in")
         })
       })
     })
