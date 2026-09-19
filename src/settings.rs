@@ -664,7 +664,7 @@ mod tests {
     }
     assert_eq!(draft.layout, SidebarLayout::Gauges);
 
-    // The gauges hint is the longest of the three, so check it against the
+    // The gauges hint is the longest of the four, so check it against the
     // same width budget the frame test holds the other layouts to.
     let frame = render(&draft, settings(), 2, 24, None);
     assert!(frame.contains("gauges"), "{frame}");

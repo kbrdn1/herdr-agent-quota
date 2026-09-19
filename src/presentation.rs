@@ -22,8 +22,6 @@ const METER_EMPTY: char = '\u{25b1}';
 /// Align `cx`, `5h`, `7d`, and `30d` without inventing period aliases.
 const GAUGE_LABEL_WIDTH: usize = 3;
 const GAUGE_CONTEXT_LABEL: &str = "cx";
-/// Herdr draws ` · ` between sibling tokens that carry a value.
-const TOKEN_SEPARATOR_WIDTH: usize = 3;
 /// How many meter cells a window row can afford at `sidebar_width` columns,
 /// or `None` when the row should render through its existing non-gauge shape
 /// rather than lose the number the bar labels to truncation.
@@ -468,8 +466,9 @@ pub(crate) fn sidebar_context(
   let Some(context) = context else {
     return String::new();
   };
+  // The meter is added at publish, once the rest of its row is known.
   if shape.layout == SidebarLayout::Compact {
-    return compact_context(context, style, shape);
+    return format!("{}%", format_percent(context_percent(context, style)));
   }
   match gauge_cells(shape, GAUGE_CONTEXT_LABEL) {
     Some(cells) => {
@@ -490,33 +489,19 @@ pub(crate) fn sidebar_context(
   }
 }
 
-/// `compact` shares its one row with the mode icon and the in/out counters,
-/// so the meter takes the columns they leave — computed from the same context
-/// they are rendered from — and drops out below the four cells a bar needs.
-fn compact_context(
-  context: &crate::model::ContextUsage,
-  style: PercentStyle,
-  shape: SidebarShape,
-) -> String {
-  let percent = context_percent(context, style);
-  let number = format!("{}%", format_percent(percent));
-  let siblings: usize = [
-    sidebar_mode(Some(context), shape),
-    sidebar_traffic_in(Some(context)),
-    sidebar_traffic_out(Some(context)),
-  ]
-  .iter()
-  .filter(|token| !token.is_empty())
-  .map(|token| token.chars().count() + TOKEN_SEPARATOR_WIDTH)
-  .sum();
-  let cells = shape
-    .content_width
-    .saturating_sub(siblings + 1 + number.len())
+/// `compact`'s context token, `31%` or `<meter> 31%`, refitted to a row whose
+/// other tokens take `siblings` columns: the meter gets what they leave and
+/// drops out below the four cells a bar needs. Reading the number back off
+/// the token makes a second fit a no-op.
+pub(crate) fn fit_compact_context(token: &str, siblings: usize, content_width: usize) -> String {
+  let number = token.rsplit(' ').next().unwrap_or(token);
+  let cells = content_width
+    .saturating_sub(siblings + 1 + number.chars().count())
     .min(MAX_METER_CELLS);
-  if cells < MIN_METER_CELLS {
-    return number;
+  match number.trim_end_matches('%').parse() {
+    Ok(printed) if cells >= MIN_METER_CELLS => format!("{} {number}", meter(printed, cells)),
+    _ => number.to_string(),
   }
-  format!("{} {number}", meter(printed_percent(percent), cells))
 }
 
 pub(crate) fn sidebar_cache(context: Option<&crate::model::ContextUsage>) -> String {
@@ -1844,43 +1829,39 @@ mod tests {
     }
   }
 
-  /// Compact drops the `cx` label and the mode's name, and gives the meter
-  /// only the columns the icon and the in/out counters leave on the row.
+  /// Compact drops the `cx` label and the mode's name. The meter is fitted
+  /// at publish, so the token leaves here as the bare number.
   #[test]
-  fn compact_sizes_its_context_meter_to_what_the_row_leaves() {
+  fn compact_renders_the_mode_icon_and_the_bare_context_number() {
     let mut context = crate::model::ContextUsage::new(31.0).unwrap();
     context.permission_mode = Some("bypassPermissions".to_string());
-    context.total_input_tokens = Some(158_000);
-    context.total_output_tokens = Some(1_200);
     let snapshot = ProviderSnapshot::new(Provider::Claude, vec![], 0).with_context(Some(context));
-    let compact = |width| {
-      MetadataTokens::from_snapshot_for_session(
-        &snapshot,
-        0,
-        None,
-        PercentStyle::Used,
-        SidebarShape::new(SidebarLayout::Compact, width),
-      )
-    };
+    let compact = MetadataTokens::from_snapshot_for_session(
+      &snapshot,
+      0,
+      None,
+      PercentStyle::Used,
+      SidebarShape::new(SidebarLayout::Compact, 32),
+    );
+    assert_eq!(compact.quota_mode, "\u{f09c}");
+    assert_eq!(compact.quota_context, "31%");
+  }
 
-    let wide = compact(32);
-    assert_eq!(wide.quota_mode, "\u{f09c}");
+  #[test]
+  fn the_compact_meter_takes_what_the_row_leaves_and_refits_cleanly() {
+    // 28 columns, 18 taken by the icon, `↑158k` and `↓1k` and their
+    // separators: six cells, a space, `31%`.
+    let fitted = fit_compact_context("31%", 18, 28);
     assert_eq!(
-      wide.quota_context,
+      fitted,
       "\u{25b0}\u{25b0}\u{25b1}\u{25b1}\u{25b1}\u{25b1} 31%"
     );
-    let row = [
-      &wide.quota_mode,
-      &wide.quota_context,
-      &wide.quota_traffic_in,
-      &wide.quota_traffic_out,
-    ]
-    .map(|token| token.as_str())
-    .join(" · ");
-    assert_eq!(row.chars().count(), 32 - SIDEBAR_CHROME_WIDTH, "{row}");
-
-    // The default 26 columns leave no room for four cells: the number stays.
-    assert_eq!(compact(26).quota_context, "31%");
+    assert_eq!(fitted.chars().count() + 18, 28);
+    assert_eq!(fit_compact_context(&fitted, 18, 28), fitted);
+    // The row grew: the meter shrinks instead of pushing past the width.
+    assert_eq!(fit_compact_context(&fitted, 20, 28).chars().count(), 8);
+    // Fewer than four cells left: the number stays alone.
+    assert_eq!(fit_compact_context(&fitted, 18, 22), "31%");
   }
 
   /// Six cells. The weekly slot renders through `from_snapshot_parts`

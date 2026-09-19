@@ -591,6 +591,7 @@ pub fn publish_pane_tokens(
       apply_context(&mut desired, context, sequence / 1_000, row);
     }
     fold_cache_row(&mut desired, row);
+    fit_compact_meter(&mut desired, row);
     if metadata_matches(&pane.tokens, &desired) {
       continue;
     }
@@ -682,19 +683,24 @@ fn desired_tokens(
   insert_mode_token(&mut tokens, &values.quota_mode, values.quota_mode_severity);
   insert_optional_token(&mut tokens, "quota_cache_ttl", &values.quota_cache_ttl);
   insert_optional_token(&mut tokens, "quota_cache_state", &values.quota_cache_state);
-  let week_base = week_style_base(&values.quota_5h);
-  insert_severity_token(
-    &mut tokens,
-    "quota_5h",
-    &values.quota_5h,
-    values.quota_5h_severity,
-  );
-  insert_severity_token(
-    &mut tokens,
-    week_base,
-    &values.quota_week,
-    values.quota_week_severity,
-  );
+  // Compact draws no window row, and a 5h/7d value moves with its ETA every
+  // minute: publishing them there would only buy writes nobody sees.
+  // Headroom stays below, because the sort and the alert read it.
+  if shape.layout != crate::cli::SidebarLayout::Compact {
+    let week_base = week_style_base(&values.quota_5h);
+    insert_severity_token(
+      &mut tokens,
+      "quota_5h",
+      &values.quota_5h,
+      values.quota_5h_severity,
+    );
+    insert_severity_token(
+      &mut tokens,
+      week_base,
+      &values.quota_week,
+      values.quota_week_severity,
+    );
+  }
   insert_optional_token(&mut tokens, "quota_topic", topic);
   if let Some(error) = &values.quota_error {
     tokens.insert("quota_error".to_string(), error.clone());
@@ -807,6 +813,34 @@ fn fold_cache_row(tokens: &mut BTreeMap<String, String>, row: RowStyle) {
     tokens.insert("quota_cache".to_string(), joined);
     tokens.remove("quota_cache_ttl");
   }
+}
+
+/// Herdr draws ` · ` between sibling tokens that carry a value.
+const TOKEN_SEPARATOR_WIDTH: usize = 3;
+
+/// Size `compact`'s context meter on the finished tokens. The mode and in/out
+/// values it shares a row with are only final here: `apply_context` can
+/// replace the context after `desired_tokens`, and a preserved pane keeps the
+/// values it already carries.
+fn fit_compact_meter(tokens: &mut BTreeMap<String, String>, row: RowStyle) {
+  if row.shape.layout != crate::cli::SidebarLayout::Compact {
+    return;
+  }
+  let Some(name) = CONTEXT_TOKEN_NAMES
+    .into_iter()
+    .find(|name| tokens.contains_key(*name))
+  else {
+    return;
+  };
+  let siblings = MODE_TOKEN_NAMES
+    .into_iter()
+    .chain(["quota_traffic_in", "quota_traffic_out"])
+    .filter_map(|name| tokens.get(name))
+    .map(|value| value.chars().count() + TOKEN_SEPARATOR_WIDTH)
+    .sum();
+  let fitted =
+    crate::presentation::fit_compact_context(&tokens[name], siblings, row.shape.content_width);
+  tokens.insert(name.to_string(), fitted);
 }
 
 /// True when the quota rows this pane is carrying are not the ones `values`
@@ -1542,6 +1576,71 @@ mod tests {
         );
       }
     }
+  }
+
+  /// A preserved compact pane keeps the mode and in/out it carries while
+  /// `apply_context` replaces its context: the meter is sized against those
+  /// published values, and the row fills the width exactly.
+  #[test]
+  fn compact_fits_its_meter_to_the_row_that_is_actually_published() {
+    let row = RowStyle::new(
+      PercentStyle::Used,
+      SidebarShape::new(crate::cli::SidebarLayout::Compact, 32),
+    );
+    let mut tokens = BTreeMap::from([
+      ("quota_mode_danger".to_string(), "\u{f09c}".to_string()),
+      ("quota_traffic_in".to_string(), "↑158k".to_string()),
+      ("quota_traffic_out".to_string(), "↓1k".to_string()),
+      (
+        "quota_context_normal".to_string(),
+        "\u{25b0}\u{25b1}\u{25b1}\u{25b1} 9%".to_string(),
+      ),
+    ]);
+    apply_context(&mut tokens, &ContextUsage::new(31.0).unwrap(), 0, row);
+    fit_compact_meter(&mut tokens, row);
+    let line = [
+      "quota_mode_danger",
+      "quota_context_normal",
+      "quota_traffic_in",
+      "quota_traffic_out",
+    ]
+    .map(|name| tokens[name].as_str())
+    .join(" · ");
+    assert_eq!(
+      line,
+      "\u{f09c} · \u{25b0}\u{25b0}\u{25b1}\u{25b1}\u{25b1}\u{25b1} 31% · ↑158k · ↓1k"
+    );
+    assert_eq!(line.chars().count(), 32 - 4);
+  }
+
+  /// Compact draws no window row, so its 5h/7d values would only be
+  /// invisible writes. Headroom still reaches the pane for the sort.
+  #[test]
+  fn compact_publishes_headroom_but_no_window_token() {
+    let snapshot = ProviderSnapshot::new(
+      Provider::Claude,
+      vec![
+        UsageWindow::new(WindowKind::FiveHour, 12.0, None).unwrap(),
+        UsageWindow::new(WindowKind::Weekly, 3.0, None).unwrap(),
+      ],
+      0,
+    );
+    let compact = SidebarShape::from(crate::cli::SidebarLayout::Compact);
+    let values = MetadataTokens::from_snapshot_for_session(
+      &snapshot,
+      0,
+      None,
+      PercentStyle::Remaining,
+      compact,
+    );
+    let desired = desired_tokens(&values, "", compact);
+    assert!(
+      !desired
+        .keys()
+        .any(|name| name.starts_with("quota_5h") || name.starts_with("quota_week")),
+      "{desired:?}"
+    );
+    assert_eq!(desired.get(HEADROOM_TOKEN).map(String::as_str), Some("088"));
   }
 
   /// Only one context name is ever filled, so a severity change or a layout
