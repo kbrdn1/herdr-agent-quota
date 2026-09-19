@@ -116,7 +116,8 @@ while (($# > 0)); do
       shift 2
       ;;
     -h|--help)
-      sed -n '2,55p' "$0"
+      # Everything between the shebang and `set`, so the header can grow.
+      awk 'NR > 1 && /^set -euo pipefail/ { exit } NR > 1' "$0"
       exit 0
       ;;
     *)
