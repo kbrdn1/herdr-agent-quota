@@ -817,6 +817,13 @@ fn fold_cache_row(tokens: &mut BTreeMap<String, String>, row: RowStyle) {
 
 /// Herdr draws ` · ` between sibling tokens that carry a value.
 const TOKEN_SEPARATOR_WIDTH: usize = 3;
+/// Columns the compact row leaves free. Filled to `content_width` exactly,
+/// its last token clipped: with `sidebar_width = 32` the terminal is 251
+/// columns and the pane area 219, so the sidebar's own chrome sits inside
+/// those 32 and the row gets one column less than `content_width` claims.
+/// A nerd-font icon drawn two cells wide would cost the same column. Raise
+/// this if the last token still clips.
+const COMPACT_ROW_SLACK: usize = 1;
 
 /// Size `compact`'s context meter on the finished tokens. The mode and in/out
 /// values it shares a row with are only final here: `apply_context` can
@@ -832,14 +839,17 @@ fn fit_compact_meter(tokens: &mut BTreeMap<String, String>, row: RowStyle) {
   else {
     return;
   };
-  let siblings = MODE_TOKEN_NAMES
+  let siblings: usize = MODE_TOKEN_NAMES
     .into_iter()
     .chain(["quota_traffic_in", "quota_traffic_out"])
     .filter_map(|name| tokens.get(name))
     .map(|value| value.chars().count() + TOKEN_SEPARATOR_WIDTH)
     .sum();
-  let fitted =
-    crate::presentation::fit_compact_context(&tokens[name], siblings, row.shape.content_width);
+  let fitted = crate::presentation::fit_compact_context(
+    &tokens[name],
+    siblings + COMPACT_ROW_SLACK,
+    row.shape.content_width,
+  );
   tokens.insert(name.to_string(), fitted);
 }
 
@@ -1580,7 +1590,7 @@ mod tests {
 
   /// A preserved compact pane keeps the mode and in/out it carries while
   /// `apply_context` replaces its context: the meter is sized against those
-  /// published values, and the row fills the width exactly.
+  /// published values, and the row stops one slack column short of the width.
   #[test]
   fn compact_fits_its_meter_to_the_row_that_is_actually_published() {
     let row = RowStyle::new(
@@ -1608,9 +1618,9 @@ mod tests {
     .join(" · ");
     assert_eq!(
       line,
-      "\u{f09c} · \u{25b0}\u{25b0}\u{25b1}\u{25b1}\u{25b1}\u{25b1} 31% · ↑158k · ↓1k"
+      "\u{f09c} · \u{25b0}\u{25b0}\u{25b1}\u{25b1}\u{25b1} 31% · ↑158k · ↓1k"
     );
-    assert_eq!(line.chars().count(), 32 - 4);
+    assert_eq!(line.chars().count(), 32 - 4 - COMPACT_ROW_SLACK);
   }
 
   /// Compact draws no window row, so its 5h/7d values would only be
