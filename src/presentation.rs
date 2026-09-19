@@ -22,6 +22,8 @@ const METER_EMPTY: char = '\u{25b1}';
 /// Align `cx`, `5h`, `7d`, and `30d` without inventing period aliases.
 const GAUGE_LABEL_WIDTH: usize = 3;
 const GAUGE_CONTEXT_LABEL: &str = "cx";
+/// Herdr draws ` · ` between sibling tokens that carry a value.
+const TOKEN_SEPARATOR_WIDTH: usize = 3;
 /// How many meter cells a window row can afford at `sidebar_width` columns,
 /// or `None` when the row should render through its existing non-gauge shape
 /// rather than lose the number the bar labels to truncation.
@@ -116,7 +118,7 @@ fn meter(printed: u32, cells: usize) -> String {
 /// bar, or a label that would not fit the label column.
 fn gauge_cells(shape: SidebarShape, label: &str) -> Option<usize> {
   match shape.layout {
-    SidebarLayout::Packed | SidebarLayout::Stacked => None,
+    SidebarLayout::Packed | SidebarLayout::Stacked | SidebarLayout::Compact => None,
     SidebarLayout::Gauges => shape
       .meter_cells
       .filter(|_| label.is_ascii() && label.len() <= GAUGE_LABEL_WIDTH),
@@ -141,7 +143,8 @@ pub struct MetadataTokens {
   pub quota_week_severity: Option<Severity>,
   pub quota_context: String,
   /// Read from context *left*, on the same bands as the window severities,
-  /// whichever side of the ledger the row prints. Only `gauges` renders it.
+  /// whichever side of the ledger the row prints. Only `gauges` and
+  /// `compact` render it.
   pub quota_context_severity: Option<Severity>,
   pub quota_cache: String,
   /// Session input and output tokens as the provider counts them. Two
@@ -284,7 +287,7 @@ impl MetadataTokens {
       quota_traffic_in: sidebar_traffic_in(context),
       quota_traffic_out: sidebar_traffic_out(context),
       quota_branch: sidebar_branch(context),
-      quota_mode: sidebar_mode(context),
+      quota_mode: sidebar_mode(context, shape),
       quota_mode_severity: mode_severity(context),
       quota_cache_ttl: sidebar_cache_ttl(context, now_unix),
       quota_cache_state: sidebar_cache_state(context, now_unix),
@@ -465,6 +468,9 @@ pub(crate) fn sidebar_context(
   let Some(context) = context else {
     return String::new();
   };
+  if shape.layout == SidebarLayout::Compact {
+    return compact_context(context, style, shape);
+  }
   match gauge_cells(shape, GAUGE_CONTEXT_LABEL) {
     Some(cells) => {
       let percent = context_percent(context, style);
@@ -482,6 +488,35 @@ pub(crate) fn sidebar_context(
     // Historical layouts keep their consumption label.
     None => format!("context {}%", format_percent(context.used_percent)),
   }
+}
+
+/// `compact` shares its one row with the mode icon and the in/out counters,
+/// so the meter takes the columns they leave — computed from the same context
+/// they are rendered from — and drops out below the four cells a bar needs.
+fn compact_context(
+  context: &crate::model::ContextUsage,
+  style: PercentStyle,
+  shape: SidebarShape,
+) -> String {
+  let percent = context_percent(context, style);
+  let number = format!("{}%", format_percent(percent));
+  let siblings: usize = [
+    sidebar_mode(Some(context), shape),
+    sidebar_traffic_in(Some(context)),
+    sidebar_traffic_out(Some(context)),
+  ]
+  .iter()
+  .filter(|token| !token.is_empty())
+  .map(|token| token.chars().count() + TOKEN_SEPARATOR_WIDTH)
+  .sum();
+  let cells = shape
+    .content_width
+    .saturating_sub(siblings + 1 + number.len())
+    .min(MAX_METER_CELLS);
+  if cells < MIN_METER_CELLS {
+    return number;
+  }
+  format!("{} {number}", meter(printed_percent(percent), cells))
 }
 
 pub(crate) fn sidebar_cache(context: Option<&crate::model::ContextUsage>) -> String {
@@ -535,12 +570,19 @@ fn mode_presentation(mode: &str) -> (&'static str, String, Severity) {
   }
 }
 
-pub(crate) fn sidebar_mode(context: Option<&crate::model::ContextUsage>) -> String {
+/// `compact` keeps the icon alone: its hue already carries the band.
+pub(crate) fn sidebar_mode(
+  context: Option<&crate::model::ContextUsage>,
+  shape: SidebarShape,
+) -> String {
   context
     .and_then(|context| context.permission_mode.as_deref())
     .map(|mode| {
       let (icon, label, _) = mode_presentation(mode);
-      format!("{icon} {label}")
+      match shape.layout {
+        SidebarLayout::Compact => icon.to_string(),
+        _ => format!("{icon} {label}"),
+      }
     })
     .unwrap_or_default()
 }
@@ -1800,6 +1842,45 @@ mod tests {
       );
       assert_eq!(plain.quota_context, "context 31%", "{layout:?}");
     }
+  }
+
+  /// Compact drops the `cx` label and the mode's name, and gives the meter
+  /// only the columns the icon and the in/out counters leave on the row.
+  #[test]
+  fn compact_sizes_its_context_meter_to_what_the_row_leaves() {
+    let mut context = crate::model::ContextUsage::new(31.0).unwrap();
+    context.permission_mode = Some("bypassPermissions".to_string());
+    context.total_input_tokens = Some(158_000);
+    context.total_output_tokens = Some(1_200);
+    let snapshot = ProviderSnapshot::new(Provider::Claude, vec![], 0).with_context(Some(context));
+    let compact = |width| {
+      MetadataTokens::from_snapshot_for_session(
+        &snapshot,
+        0,
+        None,
+        PercentStyle::Used,
+        SidebarShape::new(SidebarLayout::Compact, width),
+      )
+    };
+
+    let wide = compact(32);
+    assert_eq!(wide.quota_mode, "\u{f09c}");
+    assert_eq!(
+      wide.quota_context,
+      "\u{25b0}\u{25b0}\u{25b1}\u{25b1}\u{25b1}\u{25b1} 31%"
+    );
+    let row = [
+      &wide.quota_mode,
+      &wide.quota_context,
+      &wide.quota_traffic_in,
+      &wide.quota_traffic_out,
+    ]
+    .map(|token| token.as_str())
+    .join(" · ");
+    assert_eq!(row.chars().count(), 32 - SIDEBAR_CHROME_WIDTH, "{row}");
+
+    // The default 26 columns leave no room for four cells: the number stays.
+    assert_eq!(compact(26).quota_context, "31%");
   }
 
   /// Six cells. The weekly slot renders through `from_snapshot_parts`

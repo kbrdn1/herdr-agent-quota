@@ -107,8 +107,8 @@ const LEGACY_METADATA_TOKEN_NAMES: [&str; 4] = [
 /// The names the context row can be published into, in the order a report
 /// clears them. Herdr fixes a token's colour by name, so the only way to
 /// colour the context row is to publish it into a name whose row template
-/// already carries that colour — which is why `gauges` needs the three
-/// severity variants and `packed`/`stacked` keep the plain one.
+/// already carries that colour — which is why `gauges` and `compact` need the
+/// three severity variants and `packed`/`stacked` keep the plain one.
 ///
 /// Exactly one is ever filled. Publishing a second would draw two context
 /// rows in the same pane.
@@ -959,7 +959,8 @@ fn context_token_name(
   shape: SidebarShape,
   severity: Option<crate::model::Severity>,
 ) -> &'static str {
-  if shape.layout != crate::cli::SidebarLayout::Gauges {
+  use crate::cli::SidebarLayout;
+  if !matches!(shape.layout, SidebarLayout::Gauges | SidebarLayout::Compact) {
     return "quota_context";
   }
   // `Severity::for_context_remaining` never returns `Unknown`, and a caller

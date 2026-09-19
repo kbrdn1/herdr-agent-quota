@@ -66,7 +66,7 @@ herdr plugin pane open --plugin herdr-agent-quota --entrypoint settings --focus
 | 设置 | 可选项 |
 | --- | --- |
 | Percentages | 剩余或已用比例；颜色始终表示剩余额度 |
-| Layout | `gauges`（默认）在每个额度数字旁加进度条；`packed` 合并相关字段；`stacked` 将字段分行显示 |
+| Layout | `gauges`（默认）在每个额度数字旁加进度条；`packed` 合并相关字段；`stacked` 将字段分行显示；`compact` 把权限模式图标、上下文进度条和输入/输出 token 放在一行（进度条需要约 32 列宽的侧栏） |
 | Row gap | Agent 之间保留零行或一行空白 |
 | Watch interval | 30 秒–1 小时，默认 60 秒 |
 | Fields | 提供方、主题、模型、缓存、TTL、上下文、短期／长期额度 |

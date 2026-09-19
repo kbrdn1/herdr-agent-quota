@@ -19,7 +19,8 @@
 #
 # --sidebar-layout gauges (default) draws a meter beside each quota number.
 # packed joins cache/TTL and 5h/7d on one row. stacked puts provider, model,
-# cache, TTL, context, 5h, and 7d on their own rows without meters.
+# cache, TTL, context, 5h, and 7d on their own rows without meters. compact
+# fits the mode icon, a context meter, and tokens in/out on one row.
 #
 # --row-gap 1 (default) leaves one blank row between agent panes; 0 packs them
 # flush. Herdr only accepts whole rows.
@@ -133,8 +134,8 @@ command -v herdr >/dev/null 2>&1 || die "Herdr is not installed or not on PATH"
 command -v cargo >/dev/null 2>&1 || die "Rust/Cargo is not installed or not on PATH"
 
 case "$SIDEBAR_LAYOUT" in
-  ""|packed|stacked|gauges) ;;
-  *) die "sidebar-layout must be packed, stacked, or gauges" ;;
+  ""|packed|stacked|gauges|compact) ;;
+  *) die "sidebar-layout must be packed, stacked, gauges, or compact" ;;
 esac
 case "$ROW_GAP" in
   ""|0|1) ;;

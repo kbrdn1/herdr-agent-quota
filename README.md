@@ -74,7 +74,7 @@ herdr plugin pane open --plugin herdr-agent-quota --entrypoint settings --focus
 | Setting | Options |
 | --- | --- |
 | Percentages | Remaining or used; colors always indicate remaining headroom |
-| Layout | `gauges` (default) adds a meter beside each quota number; `packed` groups related fields; `stacked` gives each field a row |
+| Layout | `gauges` (default) adds a meter beside each quota number; `packed` groups related fields; `stacked` gives each field a row; `compact` fits the mode icon, a context meter, and tokens in/out on one row (the meter needs a sidebar of about 32 columns) |
 | Row gap | Zero or one blank line between agents |
 | Watch interval | 30 seconds–1 hour; default 60 seconds |
 | Fields | Provider, topic, model, cache, TTL, context, short/long quota |

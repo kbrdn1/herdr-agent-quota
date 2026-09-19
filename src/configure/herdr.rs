@@ -95,7 +95,7 @@ const GAUGE_SEVERITY_PALETTE: [&str; 3] = [
 /// The normal/warning/danger hues a layout paints its quota rows with.
 fn severity_palette(layout: SidebarLayout) -> [&'static str; 3] {
   match layout {
-    SidebarLayout::Gauges => GAUGE_SEVERITY_PALETTE,
+    SidebarLayout::Gauges | SidebarLayout::Compact => GAUGE_SEVERITY_PALETTE,
     SidebarLayout::Packed | SidebarLayout::Stacked => SEVERITY_PALETTE,
   }
 }
@@ -143,7 +143,7 @@ fn mode_palette(layout: SidebarLayout) -> [&'static str; 3] {
 /// The hues the context row is painted with, which are not the window hues.
 fn context_severity_palette(layout: SidebarLayout) -> [&'static str; 3] {
   match layout {
-    SidebarLayout::Gauges => GAUGE_CONTEXT_SEVERITY_PALETTE,
+    SidebarLayout::Gauges | SidebarLayout::Compact => GAUGE_CONTEXT_SEVERITY_PALETTE,
     SidebarLayout::Packed | SidebarLayout::Stacked => CONTEXT_SEVERITY_PALETTE,
   }
 }
@@ -436,7 +436,7 @@ fn reversible_backup(
 /// The stored field set and brand choice come first: they are the ones that
 /// produced the rows on disk. The full defaults follow, so a configuration
 /// written before those settings existed is still recognised. Layout and row
-/// gap stay brute-forced — there are only six combinations, and neither is
+/// gap stay brute-forced — there are only eight combinations, and neither is
 /// recoverable from a config this function is deciding whether to trust.
 fn matches_installed_quota_rows(
   original: &str,
@@ -972,6 +972,7 @@ fn append_quota_rows(rows: &mut Array, layout: SidebarLayout) {
   // one name, not a quota gauge, so it stays compact, while a meter needs its
   // own row per field. Both halves are shared rather than copied so they cannot drift.
   match layout {
+    SidebarLayout::Compact => return append_compact_row(rows),
     SidebarLayout::Packed | SidebarLayout::Gauges => append_identity_row(rows),
     SidebarLayout::Stacked => {
       rows.push(Value::Array(styled_row(
@@ -1004,8 +1005,35 @@ fn append_quota_rows(rows: &mut Array, layout: SidebarLayout) {
   // Context folds the weekly quota when 5h is absent; empty rows collapse.
   match layout {
     SidebarLayout::Packed => append_packed_quota_rows(rows),
-    SidebarLayout::Stacked | SidebarLayout::Gauges => append_stacked_quota_rows(rows, layout),
+    // Compact returned above.
+    _ => append_stacked_quota_rows(rows, layout),
   }
+}
+
+/// Mode icon, context meter, then in/out, all on one row, with the error
+/// channel last so a pane the plugin cannot speak for still says so. Each
+/// builder pushes a row of its own; they are flattened into the one.
+fn append_compact_row(rows: &mut Array) {
+  let layout = SidebarLayout::Compact;
+  let mut parts = Array::new();
+  append_mode_row(&mut parts, layout);
+  let mut context = Array::new();
+  append_context_style_tokens(&mut context, context_severity_palette(layout));
+  parts.push(Value::Array(context));
+  append_traffic_row(&mut parts, layout);
+  parts.push(Value::Array(styled_row(
+    "$quota_error",
+    Some(QUOTA_WARNING_COLOR),
+    Some(false),
+    Some(false),
+  )));
+  rows.push(Value::Array(
+    parts
+      .iter()
+      .filter_map(Value::as_array)
+      .flat_map(|row| row.iter().cloned())
+      .collect(),
+  ));
 }
 
 fn append_identity_row(rows: &mut Array) {
@@ -1375,6 +1403,9 @@ fn print_diff_hint(layout: SidebarLayout, fields: FieldSet, brand: BrandColors) 
                 "  show the user prompt, then cache, TTL, context, 5h, and 7d on their own rows, each with a meter beside the number"
             );
     }
+    SidebarLayout::Compact => {
+      println!("  show the mode icon, a context meter, and tokens in/out on one row");
+    }
     SidebarLayout::Gauges => {
       println!("  show the user prompt, then cache, TTL, context, 5h, and 7d on their own rows");
       println!(
@@ -1510,7 +1541,10 @@ mod tests {
                         !has_standalone_agent_row(rows),
                         "native agent row duplicates branded provider/model:\n{updated}"
                     );
-                    assert!(rows.iter().skip(1).any(|row| row_contains_token(row, "$quota_topic")));
+                    // Compact's one row carries no topic.
+                    if layout != SidebarLayout::Compact {
+                        assert!(rows.iter().skip(1).any(|row| row_contains_token(row, "$quota_topic")));
+                    }
                 }
                 assert_eq!(add_quota_row_for(&updated, &[Harness::Claude], layout).unwrap(), updated);
             }
@@ -1798,6 +1832,39 @@ rows = [["state_icon", "agent"]]
     );
   }
 
+  #[test]
+  fn compact_layout_puts_mode_context_and_traffic_on_one_row() {
+    let updated =
+      add_quota_row_for("", &AgentSelection::SUPPORTED, SidebarLayout::Compact).unwrap();
+    let document = updated.parse::<DocumentMut>().unwrap();
+    let rows = document["ui"]["sidebar"]["agents"]["rows"]
+      .as_array()
+      .unwrap();
+    assert_eq!(rows.len(), 2, "{updated}");
+    let names: Vec<_> = rows
+      .get(1)
+      .and_then(Value::as_array)
+      .unwrap()
+      .iter()
+      .filter_map(configured_token_name)
+      .collect();
+    assert_eq!(
+      names,
+      [
+        "$quota_mode_normal",
+        "$quota_mode_warning",
+        "$quota_mode_danger",
+        "$quota_context_normal",
+        "$quota_context_warning",
+        "$quota_context_danger",
+        "$quota_traffic_in",
+        "$quota_traffic_out",
+        "$quota_error",
+      ]
+    );
+    assert_eq!(remove_quota_row(&updated).unwrap(), "");
+  }
+
   /// Herdr fixes `fg` per token name, so a coloured context row is a
   /// severity-suffixed family exactly like the windows have.
   #[test]
@@ -1985,9 +2052,10 @@ rows = [["state_icon", "agent"]]
     for base in ["quota_5h", "quota_week", "quota_week_inline"] {
       for (suffix, hex) in ["normal", "warning", "danger"].into_iter().zip(expected) {
         let token = format!("${base}_{suffix}");
+        // Compact carries no window row.
         assert_eq!(
           token_fg(&document, &token).as_deref(),
-          Some(hex),
+          (layout != SidebarLayout::Compact).then_some(hex),
           "{layout:?} wrote the wrong fg on {token}"
         );
       }
@@ -2001,7 +2069,7 @@ rows = [["state_icon", "agent"]]
       let token = format!("$quota_context_{suffix}");
       let fg = token_fg(&document, &token);
       match layout {
-        SidebarLayout::Gauges => assert_eq!(
+        SidebarLayout::Gauges | SidebarLayout::Compact => assert_eq!(
           fg.as_deref(),
           Some(hex),
           "{layout:?} wrote the wrong fg on {token}"
@@ -2027,8 +2095,9 @@ rows = [["state_icon", "agent"]]
   }
 
   /// A whole row of bar glyphs in a full-strength hue reads as alarm, so
-  /// `gauges` publishes its own muted set. The other two layouts colour one
-  /// short token and must keep the saturated hexes byte for byte.
+  /// `gauges` publishes its own muted set (`compact`, which draws the same
+  /// bar, shares it). `packed` and `stacked` colour one short token and must
+  /// keep the saturated hexes byte for byte.
   #[test]
   fn only_gauges_publishes_the_muted_severity_palette() {
     for layout in SidebarLayout::CHOICES {

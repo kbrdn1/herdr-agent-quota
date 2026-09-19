@@ -149,6 +149,7 @@ impl Settings {
       Choice::Layout => match self.layout {
         SidebarLayout::Packed => "cache·ttl and 5h·7d share a row",
         SidebarLayout::Stacked => "every field on its own row",
+        SidebarLayout::Compact => "one row: mode, context, in/out",
         SidebarLayout::Gauges => match Self::gauges_fit() {
           true => "a meter beside each quota number",
           false => "sidebar too narrow: renders as stacked",
@@ -652,10 +653,10 @@ mod tests {
   }
 
   #[test]
-  fn the_layout_cycles_through_all_three_choices_in_both_directions() {
+  fn the_layout_cycles_through_every_choice_in_both_directions() {
     let mut draft = settings();
     draft.cycle(Row::Choice(Choice::Layout), -1);
-    assert_eq!(draft.layout, SidebarLayout::Stacked);
+    assert_eq!(draft.layout, SidebarLayout::Compact);
     draft.cycle(Row::Choice(Choice::Layout), 1);
     assert_eq!(draft.layout, SidebarLayout::Gauges);
     for _ in 0..SidebarLayout::CHOICES.len() {

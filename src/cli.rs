@@ -88,8 +88,9 @@ pub enum Command {
     /// Sidebar row layout: gauges (default) adds a meter beside each
     /// quota number; packed joins related tokens on one row; stacked
     /// puts provider, model, cache, TTL, context, 5h, and 7d on their
-    /// own rows. Herdr plugin actions run a fixed command line, so
-    /// install.sh passes this through $HERDR_AGENT_QUOTA_SIDEBAR_LAYOUT.
+    /// own rows; compact fits mode, context, and in/out on one row. Herdr
+    /// plugin actions run a fixed command line, so install.sh passes this
+    /// through $HERDR_AGENT_QUOTA_SIDEBAR_LAYOUT.
     #[arg(long, value_enum)]
     sidebar_layout: Option<SidebarLayout>,
     /// Whether quota percentages read as remaining (default) or used.
@@ -179,7 +180,8 @@ pub enum AgentSelection {
 /// Gauges is the default: one field per row with a meter beside each quota
 /// number. Packed is the historical compact layout (cache beside TTL, 5h
 /// beside 7d). Stacked is the same rows as gauges without the meters, so a
-/// sidebar too narrow for a bar still has a readable layout. Empty tokens
+/// sidebar too narrow for a bar still has a readable layout. Compact keeps a
+/// single row per pane: mode icon, context meter, and in/out. Empty tokens
 /// collapse in every layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum SidebarLayout {
@@ -190,6 +192,8 @@ pub enum SidebarLayout {
   Packed,
   /// One field per row (provider, model, cache, TTL, context, 5h, 7d).
   Stacked,
+  /// One row: mode icon, context meter and percent, tokens in/out.
+  Compact,
 }
 
 /// A quota field the sidebar can be told to leave out.
@@ -688,13 +692,14 @@ fn parse_low_quota_alert(value: &str) -> Result<LowQuotaAlert, String> {
 impl SidebarLayout {
   pub const ENV: &'static str = "HERDR_AGENT_QUOTA_SIDEBAR_LAYOUT";
   /// The layouts the settings pane cycles through, the default first.
-  pub const CHOICES: [Self; 3] = [Self::Gauges, Self::Packed, Self::Stacked];
+  pub const CHOICES: [Self; 4] = [Self::Gauges, Self::Packed, Self::Stacked, Self::Compact];
 
   pub fn as_str(self) -> &'static str {
     match self {
       Self::Packed => "packed",
       Self::Stacked => "stacked",
       Self::Gauges => "gauges",
+      Self::Compact => "compact",
     }
   }
 
@@ -703,6 +708,7 @@ impl SidebarLayout {
       "packed" => Some(Self::Packed),
       "stacked" => Some(Self::Stacked),
       "gauges" => Some(Self::Gauges),
+      "compact" => Some(Self::Compact),
       _ => None,
     }
   }
