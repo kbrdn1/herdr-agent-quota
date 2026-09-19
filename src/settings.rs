@@ -149,7 +149,7 @@ impl Settings {
       Choice::Layout => match self.layout {
         SidebarLayout::Packed => "cache·ttl and 5h·7d share a row",
         SidebarLayout::Stacked => "every field on its own row",
-        SidebarLayout::Compact => "one row: mode, context, in/out",
+        SidebarLayout::Compact => "model / mode·cx·in·out / cache·ttl",
         SidebarLayout::Gauges => match Self::gauges_fit() {
           true => "a meter beside each quota number",
           false => "sidebar too narrow: renders as stacked",

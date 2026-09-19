@@ -88,7 +88,8 @@ pub enum Command {
     /// Sidebar row layout: gauges (default) adds a meter beside each
     /// quota number; packed joins related tokens on one row; stacked
     /// puts provider, model, cache, TTL, context, 5h, and 7d on their
-    /// own rows; compact fits mode, context, and in/out on one row. Herdr
+    /// own rows; compact folds mode, context, and in/out into one row
+    /// between the model and cache/TTL rows. Herdr
     /// plugin actions run a fixed command line, so install.sh passes this
     /// through $HERDR_AGENT_QUOTA_SIDEBAR_LAYOUT.
     #[arg(long, value_enum)]
@@ -180,8 +181,9 @@ pub enum AgentSelection {
 /// Gauges is the default: one field per row with a meter beside each quota
 /// number. Packed is the historical compact layout (cache beside TTL, 5h
 /// beside 7d). Stacked is the same rows as gauges without the meters, so a
-/// sidebar too narrow for a bar still has a readable layout. Compact keeps a
-/// single row per pane: mode icon, context meter, and in/out. Empty tokens
+/// sidebar too narrow for a bar still has a readable layout. Compact keeps
+/// three rows per pane: model, then mode icon, context meter, and in/out on
+/// one row, then cache and TTL. Empty tokens
 /// collapse in every layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum SidebarLayout {
@@ -192,7 +194,7 @@ pub enum SidebarLayout {
   Packed,
   /// One field per row (provider, model, cache, TTL, context, 5h, 7d).
   Stacked,
-  /// One row: mode icon, context meter and percent, tokens in/out.
+  /// Model; mode icon, context meter, tokens in/out on one row; cache · TTL.
   Compact,
 }
 

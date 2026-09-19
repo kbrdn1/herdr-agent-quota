@@ -1012,23 +1012,19 @@ fn append_quota_rows(rows: &mut Array, layout: SidebarLayout) {
   }
 }
 
-/// Mode icon, context meter, then in/out, all on one row, with the error
-/// channel last so a pane the plugin cannot speak for still says so. Each
-/// builder pushes a row of its own; they are flattened into the one.
+/// Three rows: the model and its effort, then mode icon, context meter and
+/// in/out folded into one, then packed's cache row, which also carries the
+/// error channel. The middle builders each push a row of their own; they are
+/// flattened into the one.
 fn append_compact_row(rows: &mut Array) {
   let layout = SidebarLayout::Compact;
+  append_identity_row(rows);
   let mut parts = Array::new();
   append_mode_row(&mut parts, layout);
   let mut context = Array::new();
   append_context_style_tokens(&mut context, context_severity_palette(layout));
   parts.push(Value::Array(context));
   append_traffic_row(&mut parts, layout);
-  parts.push(Value::Array(styled_row(
-    "$quota_error",
-    Some(QUOTA_WARNING_COLOR),
-    Some(false),
-    Some(false),
-  )));
   rows.push(Value::Array(
     parts
       .iter()
@@ -1036,6 +1032,7 @@ fn append_compact_row(rows: &mut Array) {
       .flat_map(|row| row.iter().cloned())
       .collect(),
   ));
+  append_cache_row(rows);
 }
 
 fn append_identity_row(rows: &mut Array) {
@@ -1406,7 +1403,9 @@ fn print_diff_hint(layout: SidebarLayout, fields: FieldSet, brand: BrandColors) 
             );
     }
     SidebarLayout::Compact => {
-      println!("  show the mode icon, a context meter, and tokens in/out on one row");
+      println!(
+        "  show the model, then the mode icon, a context meter, and tokens in/out on one row, then cache and TTL"
+      );
     }
     SidebarLayout::Gauges => {
       println!("  show the user prompt, then cache, TTL, context, 5h, and 7d on their own rows");
@@ -1847,33 +1846,39 @@ rows = [["state_icon", "agent"]]
   }
 
   #[test]
-  fn compact_layout_puts_mode_context_and_traffic_on_one_row() {
+  fn compact_layout_folds_mode_context_and_traffic_between_model_and_cache() {
     let updated =
       add_quota_row_for("", &AgentSelection::SUPPORTED, SidebarLayout::Compact).unwrap();
     let document = updated.parse::<DocumentMut>().unwrap();
     let rows = document["ui"]["sidebar"]["agents"]["rows"]
       .as_array()
       .unwrap();
-    assert_eq!(rows.len(), 2, "{updated}");
-    let names: Vec<_> = rows
-      .get(1)
-      .and_then(Value::as_array)
-      .unwrap()
+    let names: Vec<Vec<_>> = rows
       .iter()
-      .filter_map(configured_token_name)
+      .skip(1)
+      .filter_map(Value::as_array)
+      .map(|row| row.iter().filter_map(configured_token_name).collect())
       .collect();
     assert_eq!(
       names,
       [
-        "$quota_mode_normal",
-        "$quota_mode_warning",
-        "$quota_mode_danger",
-        "$quota_context_normal",
-        "$quota_context_warning",
-        "$quota_context_danger",
-        "$quota_traffic_in",
-        "$quota_traffic_out",
-        "$quota_error",
+        vec!["$quota_provider_model"],
+        vec![
+          "$quota_mode_normal",
+          "$quota_mode_warning",
+          "$quota_mode_danger",
+          "$quota_context_normal",
+          "$quota_context_warning",
+          "$quota_context_danger",
+          "$quota_traffic_in",
+          "$quota_traffic_out",
+        ],
+        vec![
+          "$quota_cache",
+          "$quota_cache_ttl",
+          "$quota_cache_state",
+          "$quota_error",
+        ],
       ]
     );
     assert_eq!(remove_quota_row(&updated).unwrap(), "");

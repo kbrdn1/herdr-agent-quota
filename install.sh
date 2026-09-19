@@ -20,7 +20,8 @@
 # --sidebar-layout gauges (default) draws a meter beside each quota number.
 # packed joins cache/TTL and 5h/7d on one row. stacked puts provider, model,
 # cache, TTL, context, 5h, and 7d on their own rows without meters. compact
-# fits the mode icon, a context meter, and tokens in/out on one row.
+# shows the model, the mode icon + context meter + tokens in/out on one row,
+# then cache and TTL.
 #
 # --row-gap 1 (default) leaves one blank row between agent panes; 0 packs them
 # flush. Herdr only accepts whole rows.
@@ -115,7 +116,7 @@ while (($# > 0)); do
       shift 2
       ;;
     -h|--help)
-      sed -n '2,54p' "$0"
+      sed -n '2,55p' "$0"
       exit 0
       ;;
     *)
