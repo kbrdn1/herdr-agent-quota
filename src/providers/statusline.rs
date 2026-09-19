@@ -211,12 +211,21 @@ pub fn enrich_cache_session(
     return;
   };
 
-  let matching_previous =
-    previous_cache.filter(|previous| previous.session_id.as_deref() == Some(session_id));
+  // A total written before output was counted also counted each message once
+  // per content block: it is recomputed from the start, not extended.
+  let matching_previous = previous_cache.filter(|previous| {
+    previous.session_id.as_deref() == Some(session_id)
+      && previous
+        .session_totals
+        .as_ref()
+        .is_none_or(|totals| totals.output_tokens.is_some())
+  });
   let previous_offset = matching_previous
     .map(|previous| previous.transcript_offset)
     .unwrap_or_default();
   let mut increment_totals: Option<CacheTotals> = None;
+  let mut last_message =
+    matching_previous.and_then(|previous| previous.transcript_message_id.clone());
   let Some((next_offset, transcript_reset)) = read_transcript_increment(
     Path::new(path),
     if matching_previous.is_some() {
@@ -231,6 +240,13 @@ pub fn enrich_cache_session(
       let Some(usage) = assistant_usage(&entry) else {
         return;
       };
+      // One line per content block, each repeating the message's usage.
+      let id = entry.pointer("/message/id").and_then(Value::as_str);
+      if id.is_some() && id == last_message.as_deref() {
+        return;
+      }
+      last_message = id.map(str::to_string);
+      let output = token_count(usage, "output_tokens", "outputTokens");
       let fresh = token_count(usage, "input_tokens", "inputTokens");
       let read = token_count(usage, "cache_read_input_tokens", "cacheReadInputTokens");
       let creation = token_count(
@@ -245,6 +261,9 @@ pub fn enrich_cache_session(
         existing.add_token_counts(fresh, read, creation);
       } else {
         increment_totals = CacheTotals::from_token_counts(fresh, read, creation);
+      }
+      if let Some(totals) = increment_totals.as_mut() {
+        totals.add_output_tokens(output);
       }
     },
   ) else {
@@ -263,13 +282,30 @@ pub fn enrich_cache_session(
         increment.read_tokens,
         increment.creation_tokens,
       );
+      existing.add_output_tokens(increment.output_tokens.unwrap_or_default());
     } else {
       totals = Some(increment);
     }
   }
 
+  // The statusLine's `total_*_tokens` are the latest request's context and
+  // reply, not the session's. In counts what the session wrote: fresh input
+  // and cache writes, not the cache re-read on every request.
+  let session_in_out = totals.as_ref().map(|totals| {
+    (
+      totals
+        .fresh_input_tokens
+        .saturating_add(totals.creation_tokens),
+      totals.output_tokens.unwrap_or_default(),
+    )
+  });
   cache.session_totals = totals;
   cache.transcript_offset = next_offset;
+  cache.transcript_message_id = last_message;
+  if let Some((input, output)) = session_in_out {
+    context.total_input_tokens = Some(input);
+    context.total_output_tokens = Some(output);
+  }
 }
 
 /// How far back to look for a permission mode. It is only written when it
@@ -380,6 +416,60 @@ mod tests {
     );
   }
 
+  /// Claude Code writes one line per content block, each repeating the
+  /// message's usage, and a read can stop between two of them. The statusLine
+  /// `total_*` fields are the latest request only; the session's in/out come
+  /// from the transcript, and a total from before output was counted is
+  /// recomputed rather than extended.
+  #[test]
+  fn session_in_out_count_each_message_once_across_reads() {
+    let transcript = tempfile::NamedTempFile::new().unwrap();
+    let line = |id: &str, block: &str, output: u64| {
+      format!(
+        r#"{{"type":"assistant","message":{{"id":"{id}","content":[{{"type":"{block}"}}],"usage":{{"input_tokens":2,"cache_read_input_tokens":1000,"cache_creation_input_tokens":300,"output_tokens":{output}}}}}}}"#
+      ) + "\n"
+    };
+    std::fs::write(
+      transcript.path(),
+      line("m1", "thinking", 400) + &line("m1", "tool_use", 400) + &line("m2", "thinking", 50),
+    )
+    .unwrap();
+    let statusline = json!({"session_id": "s", "transcript_path": transcript.path()});
+    let latest_only = |snapshot: ProviderSnapshot| {
+      let context = snapshot.context.unwrap();
+      snapshot_with_cache().with_context(Some(context.with_totals(Some(1_302), Some(50), None)))
+    };
+
+    let mut first = latest_only(snapshot_with_cache());
+    enrich_cache_session(&mut first, &statusline, None);
+    let context = first.context.unwrap();
+    assert_eq!(context.total_input_tokens, Some(604));
+    assert_eq!(context.total_output_tokens, Some(450));
+
+    // The rest of m2 lands after the first read stopped.
+    let mut file = std::fs::OpenOptions::new()
+      .append(true)
+      .open(transcript.path())
+      .unwrap();
+    file
+      .write_all((line("m2", "text", 50) + &line("m3", "text", 7)).as_bytes())
+      .unwrap();
+    let mut second = latest_only(snapshot_with_cache());
+    enrich_cache_session(&mut second, &statusline, context.cache.as_ref());
+    let second = second.context.unwrap();
+    assert_eq!(second.total_input_tokens, Some(906));
+    assert_eq!(second.total_output_tokens, Some(457));
+
+    // An older build's total has no output count, and counted per block.
+    let mut legacy = second.cache.clone().unwrap();
+    let totals = legacy.session_totals.as_mut().unwrap();
+    totals.output_tokens = None;
+    totals.creation_tokens = 99_999;
+    let mut upgraded = latest_only(snapshot_with_cache());
+    enrich_cache_session(&mut upgraded, &statusline, Some(&legacy));
+    assert_eq!(upgraded.context.unwrap().total_output_tokens, Some(457));
+  }
+
   #[test]
   fn accumulates_session_cache_counters_once_per_transcript_offset() {
     let transcript = tempfile::NamedTempFile::new().unwrap();
@@ -421,6 +511,9 @@ mod tests {
 
     let mut unchanged_snapshot = snapshot_with_cache();
     enrich_cache_session(&mut unchanged_snapshot, &statusline, Some(&second_cache));
+    let unchanged_context = unchanged_snapshot.context.clone().unwrap();
+    assert_eq!(unchanged_context.total_input_tokens, Some(270));
+    assert_eq!(unchanged_context.total_output_tokens, Some(0));
     assert_eq!(
       unchanged_snapshot
         .context

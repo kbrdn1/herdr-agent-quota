@@ -1305,6 +1305,7 @@ mod tests {
           session_totals: None,
           session_id: None,
           transcript_offset: 0,
+          transcript_message_id: None,
         }),
       }));
       let desired = desired_tokens(

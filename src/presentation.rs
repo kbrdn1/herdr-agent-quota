@@ -516,9 +516,10 @@ pub(crate) fn sidebar_cache(context: Option<&crate::model::ContextUsage>) -> Str
   format!("cache {hit_percent:.1}%")
 }
 
-/// Session in/out as the provider counts them, not a sum of cache counters:
-/// the latter recounts every cache re-read and runs an order of magnitude
-/// high. A provider that reports neither gets no row.
+/// Session in/out. With a statusLine transcript they are summed there, once
+/// per message, from fresh input and cache writes — never cache re-reads,
+/// which recount the whole context on every request. Otherwise they are what
+/// the provider reports. A provider that reports neither gets no row.
 pub(crate) fn sidebar_traffic_in(context: Option<&crate::model::ContextUsage>) -> String {
   context
     .and_then(|context| context.total_input_tokens)

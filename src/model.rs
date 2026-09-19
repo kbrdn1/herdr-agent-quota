@@ -502,6 +502,11 @@ pub struct CacheUsage {
   pub session_id: Option<String>,
   #[serde(default)]
   pub transcript_offset: u64,
+  /// The last assistant message the transcript pass counted. Claude Code
+  /// writes one line per content block, each repeating its message's usage,
+  /// and a read can end between two of them.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub transcript_message_id: Option<String>,
 }
 
 /// Cache counters accumulated across all completed requests in one session.
@@ -511,6 +516,10 @@ pub struct CacheTotals {
   pub read_tokens: u64,
   pub creation_tokens: u64,
   pub hit_percent: f64,
+  /// Output tokens of the same requests. `None` on a total written before
+  /// output was counted, which the transcript pass recomputes from the start.
+  #[serde(default)]
+  pub output_tokens: Option<u64>,
 }
 
 impl CacheTotals {
@@ -530,7 +539,17 @@ impl CacheTotals {
       read_tokens,
       creation_tokens,
       hit_percent: read_tokens as f64 / total as f64 * 100.0,
+      output_tokens: Some(0),
     })
+  }
+
+  pub fn add_output_tokens(&mut self, output_tokens: u64) {
+    self.output_tokens = Some(
+      self
+        .output_tokens
+        .unwrap_or_default()
+        .saturating_add(output_tokens),
+    );
   }
 
   pub fn add_token_counts(
@@ -577,6 +596,7 @@ impl CacheUsage {
       session_totals: None,
       session_id: None,
       transcript_offset: 0,
+      transcript_message_id: None,
     })
   }
 
