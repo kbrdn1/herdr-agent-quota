@@ -489,17 +489,24 @@ pub(crate) fn sidebar_context(
   }
 }
 
+/// The shortest compact meter. It shrinks one cell at a time with the room
+/// its row leaves, down to two: `meter` still tells 0 and 100 from the rest
+/// there, and one cell could not.
+const MIN_COMPACT_METER_CELLS: usize = 2;
+
 /// `compact`'s context token, `31%` or `<meter> 31%`, refitted to a row whose
 /// other tokens take `siblings` columns: the meter gets what they leave and
-/// drops out below the four cells a bar needs. Reading the number back off
-/// the token makes a second fit a no-op.
+/// drops out below two cells. Reading the number back off the token makes a
+/// second fit a no-op.
 pub(crate) fn fit_compact_context(token: &str, siblings: usize, content_width: usize) -> String {
   let number = token.rsplit(' ').next().unwrap_or(token);
   let cells = content_width
     .saturating_sub(siblings + 1 + number.chars().count())
     .min(MAX_METER_CELLS);
   match number.trim_end_matches('%').parse() {
-    Ok(printed) if cells >= MIN_METER_CELLS => format!("{} {number}", meter(printed, cells)),
+    Ok(printed) if cells >= MIN_COMPACT_METER_CELLS => {
+      format!("{} {number}", meter(printed, cells))
+    }
     _ => number.to_string(),
   }
 }
@@ -1859,10 +1866,15 @@ mod tests {
     );
     assert_eq!(fitted.chars().count() + 18, 28);
     assert_eq!(fit_compact_context(&fitted, 18, 28), fitted);
-    // The row grew: the meter shrinks instead of pushing past the width.
+    // The row grew: the meter shrinks a cell at a time, down to two.
     assert_eq!(fit_compact_context(&fitted, 20, 28).chars().count(), 8);
-    // Fewer than four cells left: the number stays alone.
-    assert_eq!(fit_compact_context(&fitted, 18, 22), "31%");
+    assert_eq!(
+      fit_compact_context(&fitted, 21, 28),
+      "\u{25b0}\u{25b1}\u{25b1} 31%"
+    );
+    assert_eq!(fit_compact_context(&fitted, 22, 28), "\u{25b0}\u{25b1} 31%");
+    // One cell left: the number stays alone.
+    assert_eq!(fit_compact_context(&fitted, 23, 28), "31%");
   }
 
   /// Six cells. The weekly slot renders through `from_snapshot_parts`
