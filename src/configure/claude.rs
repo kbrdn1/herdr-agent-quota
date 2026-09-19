@@ -67,12 +67,35 @@ pub fn uninstall_at(settings: &Path, state: &Path) -> Result<()> {
   CONFIG.uninstall(settings, state)
 }
 
+/// The cache this session saved last, from the per-session contexts the
+/// observation keeps: the provider-level context is usually another session.
+fn previous_session_cache(cache: &CacheStore, value: &Value) -> Option<crate::model::CacheUsage> {
+  let session_id = value.get("session_id").and_then(Value::as_str)?;
+  cache
+    .load_statusline_observation(Provider::Claude)
+    .ok()
+    .flatten()?
+    .snapshot
+    .session_contexts
+    .remove(session_id)?
+    .cache
+}
+
 pub fn run_statusline_hook() -> Result<()> {
   let mut input = Vec::new();
   std::io::stdin().read_to_end(&mut input)?;
   if let Ok(value) = serde_json::from_slice::<Value>(&input) {
-    if let Ok(snapshot) = parse_statusline(&value, CacheStore::now_unix()) {
+    if let Ok(mut snapshot) = parse_statusline(&value, CacheStore::now_unix()) {
       if let Ok(cache) = CacheStore::from_env() {
+        // Every session's statusLine arrives here; a refresh only sees the
+        // one that wrote last. Summing here keeps each session's in/out and
+        // cache totals current, reading only what its transcript appended.
+        let previous = previous_session_cache(&cache, &value);
+        crate::providers::statusline::enrich_cache_session(
+          &mut snapshot,
+          &value,
+          previous.as_ref(),
+        );
         let _ = cache.save_statusline_observation(Provider::Claude, snapshot, &value);
       }
     }

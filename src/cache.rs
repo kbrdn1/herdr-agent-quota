@@ -1191,6 +1191,7 @@ fn merge_preserved_context(
         }
         if current_cache.transcript_offset == 0 {
           current_cache.transcript_offset = previous_cache.transcript_offset;
+          current_cache.transcript_message_id = previous_cache.transcript_message_id.clone();
         }
         if current_cache.ttl_seconds.is_none() {
           current_cache.ttl_seconds = previous_cache.ttl_seconds;
