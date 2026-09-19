@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 
-const QUOTA_ROW_MARKERS: [&str; 49] = [
+const QUOTA_ROW_MARKERS: [&str; 50] = [
   "$quota_badge",
   "$quota_state",
   "$quota_icon",
@@ -22,6 +22,8 @@ const QUOTA_ROW_MARKERS: [&str; 49] = [
   "$quota_context_warning",
   "$quota_context_danger",
   "$quota_cache",
+  // Split into in/out; still stripped so a repair drops the old row.
+  "$quota_traffic",
   "$quota_traffic_in",
   "$quota_traffic_out",
   "$quota_branch",
@@ -1830,6 +1832,18 @@ rows = [["state_icon", "agent"]]
       .unwrap(),
       ""
     );
+  }
+
+  #[test]
+  fn a_repair_drops_the_row_of_the_old_single_traffic_token() {
+    let original = "[ui.sidebar.agents]\nrows = [[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [{ token = \"$quota_traffic\", fg = \"#8abfb8\" }]] # herdr-agent-quota-row\n";
+    let rows = |input: &str, layout| {
+      let updated = add_quota_row_for(input, &AgentSelection::SUPPORTED, layout).unwrap();
+      updated.parse::<DocumentMut>().unwrap()["ui"]["sidebar"]["agents"]["rows"].to_string()
+    };
+    for layout in SidebarLayout::CHOICES {
+      assert_eq!(rows(original, layout), rows("", layout), "{layout:?}");
+    }
   }
 
   #[test]
