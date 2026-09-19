@@ -14,10 +14,11 @@ const MAX_METADATA_TOKENS: usize = 16;
 /// not free: it is compared on every refresh and it competes for Herdr's
 /// 16-token report budget. Add a name here only together with the field that
 /// fills it.
-const METADATA_TOKEN_NAMES: [&str; 32] = [
+const METADATA_TOKEN_NAMES: [&str; 33] = [
   "quota_provider",
   "quota_model",
   "quota_provider_model",
+  "quota_effort",
   "quota_context",
   "quota_context_normal",
   "quota_context_warning",
@@ -121,10 +122,11 @@ const CONTEXT_TOKEN_NAMES: [&str; 4] = [
 /// Values that must reach the pane in the *same* report that changed them,
 /// even when the budget is tight: the identity, the live diagnostics, and the
 /// inline week variants, whose styling flips as soon as a 5h window appears.
-const ROWS_THAT_MUST_NOT_LAG: [&str; 21] = [
+const ROWS_THAT_MUST_NOT_LAG: [&str; 22] = [
   "quota_provider",
   "quota_model",
   "quota_provider_model",
+  "quota_effort",
   "quota_topic",
   "quota_context",
   "quota_context_normal",
@@ -585,7 +587,7 @@ pub fn publish_pane_tokens(
       PaneQuotaUpdate::Preserve => pane.tokens.clone(),
     };
     if let Some(identity) = &pane_tokens.identity {
-      apply_identity(&mut desired, identity);
+      apply_identity(&mut desired, identity, row.shape);
     }
     if let Some(context) = &pane_tokens.context {
       apply_context(&mut desired, context, sequence / 1_000, row);
@@ -670,6 +672,7 @@ fn desired_tokens(
     ),
   ]);
   insert_optional_token(&mut tokens, "quota_model", &values.quota_model);
+  insert_optional_token(&mut tokens, "quota_effort", &values.quota_effort);
   insert_context_token(
     &mut tokens,
     &values.quota_context,
@@ -737,19 +740,29 @@ fn desired_cleared_quota(pane: &AgentPane) -> BTreeMap<String, String> {
   tokens
 }
 
-fn apply_identity(tokens: &mut BTreeMap<String, String>, identity: &PaneIdentity) {
+fn apply_identity(
+  tokens: &mut BTreeMap<String, String>,
+  identity: &PaneIdentity,
+  shape: SidebarShape,
+) {
+  let (model, effort) = crate::presentation::split_effort(&identity.model, shape);
   tokens.insert("quota_provider".to_string(), identity.provider.clone());
-  if identity.model.is_empty() {
+  if effort.is_empty() {
+    tokens.remove("quota_effort");
+  } else {
+    tokens.insert("quota_effort".to_string(), effort.to_string());
+  }
+  if model.is_empty() {
     tokens.remove("quota_model");
     tokens.insert(
       "quota_provider_model".to_string(),
       identity.provider.clone(),
     );
   } else {
-    tokens.insert("quota_model".to_string(), identity.model.clone());
+    tokens.insert("quota_model".to_string(), model.to_string());
     tokens.insert(
       "quota_provider_model".to_string(),
-      format!("{}/{}", identity.provider, identity.model),
+      format!("{}/{model}", identity.provider),
     );
   }
 }

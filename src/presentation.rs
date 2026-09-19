@@ -134,6 +134,8 @@ pub struct MetadataTokens {
   pub quota_provider: String,
   pub quota_model: String,
   pub quota_provider_model: String,
+  /// The reasoning effort, split off the model under `compact` only.
+  pub quota_effort: String,
   /// One compact token per window (`5h 42% 4h07m`), severity chooses the hue.
   pub quota_5h: String,
   pub quota_5h_severity: Option<Severity>,
@@ -247,7 +249,8 @@ impl MetadataTokens {
     let live = live_windows(windows, now_unix);
     let windows = live.as_slice();
     let quota_provider = snapshot.provider.display_name().to_string();
-    let quota_model = model.unwrap_or_default().to_string();
+    let (model, quota_effort) = split_effort(model.unwrap_or_default(), shape);
+    let quota_model = model.to_string();
     let omp_windows = snapshot.source.starts_with("omp.");
     let short_window = if omp_windows {
       window_in(windows, WindowKind::FiveHour)
@@ -266,6 +269,7 @@ impl MetadataTokens {
       quota_provider_model: provider_model_label(&quota_provider, &quota_model),
       quota_provider,
       quota_model,
+      quota_effort: quota_effort.to_string(),
       quota_5h_severity: short_window
         .map(|window| Severity::for_window(window, now_unix))
         .or_else(|| window_severity(windows, WindowKind::FiveHour, now_unix))
@@ -303,6 +307,7 @@ impl MetadataTokens {
       quota_provider_model: quota_provider.clone(),
       quota_provider,
       quota_model: String::new(),
+      quota_effort: String::new(),
       quota_5h: missing_five_hour_label(provider)
         .unwrap_or_default()
         .to_string(),
@@ -340,6 +345,16 @@ fn headroom(windows: &[UsageWindow]) -> Option<u8> {
     .chain(long_window(windows))
     .map(|window| window.remaining_percent.clamp(0.0, 100.0).floor() as u8)
     .min()
+}
+
+/// The model, and under `compact` the effort the statusLine parser suffixed
+/// onto it as ` · <level>`. Split into two tokens, the `·` between them is
+/// Herdr's own separator, drawn muted, instead of text in the model's hue.
+pub(crate) fn split_effort(model: &str, shape: SidebarShape) -> (&str, &str) {
+  match shape.layout {
+    SidebarLayout::Compact => model.rsplit_once(" · ").unwrap_or((model, "")),
+    _ => (model, ""),
+  }
 }
 
 fn provider_model_label(provider: &str, model: &str) -> String {
@@ -1853,6 +1868,29 @@ mod tests {
     );
     assert_eq!(compact.quota_mode, "\u{f09c}");
     assert_eq!(compact.quota_context, "31%");
+  }
+
+  /// Only compact splits the effort off, so Herdr's muted separator draws
+  /// the `·`; every other layout keeps the model as the parser wrote it.
+  #[test]
+  fn compact_publishes_the_effort_as_its_own_token() {
+    let snapshot =
+      ProviderSnapshot::new(Provider::Claude, vec![], 0).with_model(Some("Opus 5 · xhigh".into()));
+    let render = |layout: SidebarLayout| {
+      MetadataTokens::from_snapshot_for_session(
+        &snapshot,
+        0,
+        None,
+        PercentStyle::Used,
+        layout.into(),
+      )
+    };
+    let compact = render(SidebarLayout::Compact);
+    assert_eq!(compact.quota_provider_model, "Claude/Opus 5");
+    assert_eq!(compact.quota_effort, "xhigh");
+    let gauges = render(SidebarLayout::Gauges);
+    assert_eq!(gauges.quota_provider_model, "Claude/Opus 5 · xhigh");
+    assert_eq!(gauges.quota_effort, "");
   }
 
   #[test]

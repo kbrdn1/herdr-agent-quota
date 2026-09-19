@@ -7,7 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value};
 
-const QUOTA_ROW_MARKERS: [&str; 50] = [
+const QUOTA_ROW_MARKERS: [&str; 51] = [
+  "$quota_effort",
   "$quota_badge",
   "$quota_state",
   "$quota_icon",
@@ -904,7 +905,9 @@ fn append_themed_provider_row(
   let model_color = dim.or(brand);
   for item in items {
     match configured_token_name(item) {
-      Some(token @ "$quota_provider_model") | Some(token @ "$quota_provider") => {
+      Some(token @ "$quota_provider_model")
+      | Some(token @ "$quota_provider")
+      | Some(token @ "$quota_effort") => {
         row.push(styled_token(token, brand, Some(true), Some(false)));
       }
       Some(token @ "$quota_model") => {
@@ -1018,7 +1021,11 @@ fn append_quota_rows(rows: &mut Array, layout: SidebarLayout) {
 /// flattened into the one.
 fn append_compact_row(rows: &mut Array) {
   let layout = SidebarLayout::Compact;
-  append_identity_row(rows);
+  // Effort is its own token, so Herdr draws the `·` before it muted.
+  rows.push(Value::Array(Array::from_iter([
+    styled_token("$quota_provider_model", None, Some(true), Some(false)),
+    styled_token("$quota_effort", None, Some(true), Some(false)),
+  ])));
   let mut parts = Array::new();
   append_mode_row(&mut parts, layout);
   let mut context = Array::new();
@@ -1230,7 +1237,7 @@ fn field_for_token(token: &str) -> Option<SidebarField> {
   match token {
     "$quota_provider" => Some(SidebarField::Provider),
     "$quota_topic" => Some(SidebarField::Topic),
-    "$quota_model" => Some(SidebarField::Model),
+    "$quota_model" | "$quota_effort" => Some(SidebarField::Model),
     "$quota_cache" | "$quota_cache_state" => Some(SidebarField::Cache),
     "$quota_cache_ttl" => Some(SidebarField::Ttl),
     "$quota_context"
@@ -1862,7 +1869,7 @@ rows = [["state_icon", "agent"]]
     assert_eq!(
       names,
       [
-        vec!["$quota_provider_model"],
+        vec!["$quota_provider_model", "$quota_effort"],
         vec![
           "$quota_mode_normal",
           "$quota_mode_warning",
